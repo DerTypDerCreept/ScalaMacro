@@ -42,6 +42,7 @@ object convertMacro {
 					case _ => false
 				}*/
 
+				
 				if(""+name != "Nil"){ 
 				    //println(""+fields(0)+" is:")
 					println("the class"+fields(0).getClass)

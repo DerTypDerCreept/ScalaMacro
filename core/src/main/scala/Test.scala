@@ -19,6 +19,7 @@ object Test extends App {
 	
 	
 	
+	
 @convert
 object ConvertMe{
   trait Lists[T]
