@@ -27,99 +27,109 @@ object convertMacro {
 				
 				println(types(0))
 				println(showRaw(types))
-				val typ = types // ++ List(q"type FFucntor") 
+				val typ = types
 				q"trait $name[..$typ]"
 			}
 			case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" => {
 				println("we found a case class:"+name)
-				val typ = /* List(Ident(newTypeName("FFunctor"))) ++ */  types2
-				cNames = List(""+name) ++ cNames
-				/* fields(0) match {
-					case q"val $fname: $ftype" => {
-						println("Extract the first field: "+fname+":"+ftype)
-						true
-					}
-					case _ => false
-				}*/
-
-				
-				if(""+name != "Nil"){ 
-				    //println(""+fields(0)+" is:")
-					println("the class"+fields(0).getClass)
-					println("is type:"+fields(0).isType) //false
-					println("is term:"+fields(0).isTerm) //false
-					println("is def:"+fields(0).isDef) //true
-					println("tpe:"+fields(0).tpe) // null -> das ding weiss selbst net was es is
-					println(fields(1).asInstanceOf[ValDef].children)
-					val typees: List[scala.reflect.api.Types#Type] = fields.map(_.tpe)
-					println(typees)
-					println("'"*75)
-					println(fields)
-					println("'"*75)
-				}
-				
-				
-				
-				
-				
-				
-				
+				val typ = types2
+				cNames = List(""+name) ++ cNames				
 				classes = List(q"case class $name[..$types](..$fields) extends $traitname[..$typ]") ++ classes
 				q"case class $name[..$types](..$fields) extends $traitname[..$typ]"
 			}
 			case _ => x
-
-			
 		}
 		def analyzeL(x:List[Tree]):List[Tree] = x match {
 			case y :: z => analyze(y) :: analyzeL(z)
 			case _ => x
 		}
-
-		/*
+		
+		def listOf(x:List[Tree]):List[TermName] = x match {
+			//case ValDef(a,b,c,d) -> not possible causes stack overflow
+			case a :: rest => {
+				val itera = a.asInstanceOf[ValDef].productIterator
+				var i=0
+				var result = newTermName("DEFAULT")
+				while(itera.hasNext){
+					val it = itera.next
+					if(i==1){ result = it.asInstanceOf[TermName]}
+					i = i+1 
+					}
+				result	
+			} :: listOf(rest)
+			case Nil => Nil
+		}
+		
 		def modify(x:Tree,y:List[Tree]):Tree = x match {
-			case ModuleDef(a,b,templ) => ModuleDef(a,b,modify(templ).asInstanceOf[Template])
-			case Template(a,b,list) => Template(a,b,analyzeL(list))
+			case ModuleDef(a,b,templ) => ModuleDef(a,b,modify(templ,y).asInstanceOf[Template])
+			case Template(a,b,list) => Template(a,b,modifyL(list,list))
 			case _ => x
-				
-			}
 		}	
-		def modifyL(x:List[Tree], y:List[Tree]){
-			q"trait $traitname[..$types]" :: rest => {
+		def modifyL(x:List[Tree], y:List[Tree]):List[Tree] = x match {
+			case q"trait $traitname[..$types]" :: rest => {
 				val typ = List(q"type FFucntor") ++ types 
-				val newtrait = traitname+"F"
+				val newtrait = newTypeName(traitname+"F")
+				println("do we get here?")
+				
 				//val body = q"" -- construct map
 				q"trait $newtrait[..$typ]" //{..$body}"
-			} ++ {
-				val typ = List(q"type traitname[..$types]") ++ types
-				val newtrait = traitname+"F"
+			}  :: {
+				val newtrait = newTypeName(traitname+"F")
+				val typ = List(q"type $traitname[..$types]") ++ types
 				//val body = q"" -- construct fold				
 				q"trait $traitname[..$types] extends $newtrait[..$typ]" //{..$body}" 
-			} ++ modifyL(rest,y)
-			case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" =>{
-				val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
-				val newtrait = traitname+"F"
-				val newname = name+"F"
-				q"case class $newname[..$typ](..$fields) extends $newtrait[..$typ]"
-			} ++ {
-				val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
-				val newname = name+"F"
+			} :: modifyL(rest,y)
+			case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" :: rest =>{
+				//val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
+
+				//val typ = List(q"type FFucntor") ++ types 
+				//val typ2 = List(q"type FFucntor") ++ types2 
+				val newtrait = newTypeName(traitname+"F")
+				val newName = newTypeName(name+"F")
+				val theList = listOf(fields)
+				println(theList)
+				
+				//val bodyA = q"def apply[..$types](..$fields):$name[..$types] = new $name($theList)"
+				//val nam = newTermName("hello")
+				//println(q"object Obj")
+				//modifiy fields
+				
+
+				q"case class $newName[..$types](..$fields) extends $newtrait[..$types2]"
+			} ::  modifyL(rest,y) /* {
+				//val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
+				val newtrait = newTypeName(traitname+"F")
+				val newname = newTypeName(name+"F")
+				//causes stack overflow
 				q"class $name[..$types](..$fields) extends $newname[..$types2] with $traitname[..$types2]"
-			} ++ modifyL(rest,y)
+			} :: 
+			{
+			    //causes stack overflow
+				//val bodyA = q"def apply[..$types](..$fields):$name[..$types] = new $name(..fields)"
+				//val bodyU = q"def unapply[..$types](..$fields):Option[] = Some()"
+				val nam = newTermName(name+"")
+				q"object $nam"
+			} ::  modifyL(rest,y) 
+			*/
+			case a::b => a::modifyL(b,y)
+			case _ => x
 		}
-		*/
-			
-			
+
 		val outputs = expandees
 		println("?"*50)
-		
-		analyze(expandees(0))
+		//println(q"new Cons(head, tail)")
+		//println(showRaw(q"new Cons(head, tail)"))
+		println("analyze")
+		//analyze(expandees(0))
+		println("modify")
+		println(modify(expandees(0),expandees))
 		if(traitname!="FDefault"){}
-		println(classes)
-		println(showRaw(classes))
+		//println(classes)
+		//println(showRaw(classes))
 		//println(analyze(expandees(0)))
 		//println(showRaw(expandees))
 		println("?"*50)
+		
 		
 		
 		

@@ -9,16 +9,16 @@ object Helper{
 }
 
 
+
+
+
+
 object Test extends App {
     import Helper.spts
 	spts("hello")
 	}
 
-	
-	
-	
-	
-	
+
 	
 @convert
 object ConvertMe{
