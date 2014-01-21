@@ -8,18 +8,11 @@ object Helper{
 	def spts(text: String) = pts(text,"=",75)
 }
 
-
-
-
-
-
 object Test extends App {
     import Helper.spts
 	spts("hello")
 	}
 
-
-	
 @convert
 object ConvertMe{
   trait Lists[T]
