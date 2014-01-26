@@ -73,8 +73,6 @@ object convertMacro {
 			case Nil => Nil
 			case _ => x
 		}
-		
-		
 		def modify(x:Tree,y:List[Tree]):Tree = x match {
 			case ModuleDef(a,b,templ) => ModuleDef(a,b,modify(templ,y).asInstanceOf[Template])
 			case Template(a,b,list) => Template(a,b,modifyL(list,list))
