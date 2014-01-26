@@ -2,113 +2,11 @@ import scala.reflect.macros.Context
 import scala.language.experimental.macros
 import scala.annotation.StaticAnnotation
 
-
-object DefMacros {
-  //hello world macro
-  def hello(): Unit = macro hello_impl
-  def hello_impl(c: Context)(): c.Expr[Unit] = {
-	import c.universe._
-	reify { println("Hello World!") }
-  }
-  
-  //hello world macro, constructing AST for "Hello World!" and then splicing it in 
-  def hello1(): Unit = macro hello1_impl
-  def hello1_impl(c: Context)(): c.Expr[Unit] = {
-	import c.universe._
-	//construct the AST for "Hello World!" String
-	var x = c.Expr(Literal(Constant("Hello World!")))
-	reify { println(x.splice) }
-  }
-  
-  //currently just a println for anything with toString
-  def hello2[T](param : T): Unit = macro hello2_impl
-  def hello2_impl(c: Context)(param: c.Expr[Any]): c.Expr[Unit] = {
-	import c.universe._
-	//just splice the parameter in (this gives the value of the parameter)
-	reify { println(param.splice) }
-  }
-  //experimenting with printing trees
-  //aww yeah, showRaw gives a String representation of the tree
-  def hello2_1[T](param : T): Unit = macro hello2_1_impl
-  def hello2_1_impl(c: Context)(param: c.Expr[Any]): c.Expr[Unit] = {
-	import c.universe._
-	//use showRaw on param.tree to get a String representation of the tree
-	//then we have to build an AST for the String, to be able to splice it in
-	val x = c.Expr(Literal(Constant(showRaw(param.tree))))
-	reify { println(x.splice) }
-  }
-  
-  //from the example: print a parameter's name and value
-  def debug(param: Any): Unit = macro debug_impl
-  def debug_impl(c: Context)(param: c.Expr[Any]): c.Expr[Unit] = {
-    import c.universe._
-    //first extract the value
-    val paramRep = show(param.tree)
-    //build an AST
-    val paramRepTree = Literal(Constant(paramRep))
-    val paramRepExpr = c.Expr[String](paramRepTree)
-    //this part I don't get, this makes no sense
-    reify { println(paramRepExpr.splice + " = " + param.splice) }
-  }
-  
-  //function selector
-  def funSelect(param: String):Int => Int = macro funSelectImpl
-  def funSelectImpl(c: Context)(param: c.Expr[String]):c.Expr[Int => Int] = {
-    import c.universe._
-    var (Literal(Constant(x)))=param.tree
-    //throw new Exception(""+show(param.tree))
-    if(x == "+") reify((y) => y + y)
-    else if(x  == "*") reify((y) => y * y)
-    else  reify((y) => y)
-  }
-  
-
-  //macros to print the methods, vars and vals of a class	 
-	def methodNames[A]: List[String] = macro methodNames_impl[A]
-	  def methodNames_impl[A : c.WeakTypeTag](c: Context): c.Expr[List[String]] = {
-	    import c.universe._
-	 
-	    val methods: List[String] = c.weakTypeOf[A].typeSymbol.typeSignature.
-	      declarations.toList.filter((z) => z.isMethod).map(_.name.toString)
-	    val listApply = Select(reify(List).tree, newTermName("apply"))
-	 
-	    c.Expr[List[String]](Apply(listApply,
-	      List(methods.map(x => Literal(Constant(x))):_*)))
-	  }
-	  
-	  def varNames[A]: List[String] = macro varNames_impl[A]
-	  def varNames_impl[A : c.WeakTypeTag](c: Context): c.Expr[List[String]] = {
-	    import c.universe._
-	 
-	    val methods: List[String] = c.weakTypeOf[A].typeSymbol.typeSignature.
-	      declarations.toList.filter((z) => z.isTerm && z.asTerm.isVar).map(_.name.toString)
-	    val listApply = Select(reify(List).tree, newTermName("apply"))
-	 
-	    c.Expr[List[String]](Apply(listApply,
-	      List(methods.map(x => Literal(Constant(x))):_*)))
-	  }
-	  
-	  def valNames[A]: List[String] = macro valNames_impl[A]
-	  def valNames_impl[A : c.WeakTypeTag](c: Context): c.Expr[List[String]] = {
-	    import c.universe._
-	 
-	    val methods: List[String] = c.weakTypeOf[A].typeSymbol.typeSignature.
-	      declarations.toList.filter((z) => z.isTerm && z.asTerm.isVal).map(_.name.toString)
-	    val listApply = Select(reify(List).tree, newTermName("apply"))
-	 
-	    c.Expr[List[String]](Apply(listApply,
-	      List(methods.map(x => Literal(Constant(x))):_*)))
-	 
-		}
-	
-  
+class convert extends StaticAnnotation {
+	def macroTransform(annottees: Any*) = macro convertMacro.impl
 }
 
-class identity extends StaticAnnotation {
-	def macroTransform(annottees: Any*) = macro identityMacro.impl
-}
-
-object identityMacro {
+object convertMacro {
 	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
 		import c.universe._
 		val inputs = annottees.map(_.tree).toList
@@ -117,143 +15,187 @@ object identityMacro {
 			case (param: TypeDef) :: (rest @ (_ :: _)) => (param, rest)
 			case _ => (EmptyTree, inputs)
 		}
-		//println((annottee, expandees))
+		var traitname = "FDefault"
+		var classes : List[Tree] = List()
+		var cNames: List[String] = List()
+		def analyze(x:Tree):Tree = x match {
+			case ModuleDef(a,b,templ) => ModuleDef(a,b,analyze(templ).asInstanceOf[Template])
+			case Template(a,b,list) => Template(a,b,analyzeL(list))
+			case q"trait $name[..$types]" => {
+				traitname = ""+name
+				//println("we found a trait:"+name)
+				//println(types(0))
+				//println(showRaw(types))
+				val typ = types
+				q"trait $name[..$typ]"
+			}
+			case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" => {
+				println("we found a case class:"+name)
+				val typ = types2
+				cNames = List(""+name) ++ cNames				
+				classes = List(q"case class $name[..$types](..$fields) extends $traitname[..$typ]") ++ classes
+				q"case class $name[..$types](..$fields) extends $traitname[..$typ]"
+			}
+			case _ => x
+		}
+		def analyzeL(x:List[Tree]):List[Tree] = x match {
+			case y :: z => analyze(y) :: analyzeL(z)
+			case _ => x
+		}
+		
+		def listOf(x:List[ValDef]):List[Ident] = x match {
+			case ValDef(a,b,c,d) :: z => Ident(b) :: listOf(z) 
+			case Nil => Nil
+		}
+		def listOfAsSelect(x:List[ValDef], modification: String):List[Select] = x match {
+			case ValDef(a,b,c,d) :: z => {
+				val tmp=newTermName(modification); 
+				q"$tmp.$b" :: listOfAsSelect(z,modification)} 
+			case Nil => Nil
+		}
+		def updateType(x:List[ValDef], name:Tree, types:List[Tree], newType:String ):List[ValDef] = x match {
+			case ValDef(a,b,c,d) :: z => {
+				println(showRaw(c))
+				q"class ignoreMe extends $c" match {
+					case q"class ignoreMe extends $name[..$types]" => ValDef(a,b,Ident(newTypeName(newType+"")),d) :: updateType(z,name,types,newType+"") 
+					case _ => ValDef(a,b,c,d) :: updateType(z,name,types,newType+"")
+				}
+				/*
+				if(c == oldType) 
+					{
+					println("incoming type:"+showRaw(c)+" to "+Ident(newTypeName(newType+"")))
+					ValDef(a,b,Ident(newTypeName(newType+"")),d) :: updateType(z,oldType,newType+"") 
+					}
+				else
+					ValDef(a,b,c,d) :: updateType(z,oldType,newType+"")
+					*/
+			}
+			case Nil => Nil
+			case _ => x
+		}
+		
+		def modify(x:Tree,y:List[Tree]):Tree = x match {
+			case ModuleDef(a,b,templ) => ModuleDef(a,b,modify(templ,y).asInstanceOf[Template])
+			case Template(a,b,list) => Template(a,b,modifyL(list,list))
+			case _ => x
+		}	
+		def modifyL(x:List[Tree], y:List[Tree]):List[Tree] = x match {
+			case q"trait $traitname[..$types]" :: rest => {
+				val newTypName1 = q"class Whatever[FFunctor]" match {
+					case q"class Whatever[$myType]" => myType
+					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
+				}
+				val newTypName2 = q"class Whatever[FFunctor2]" match {
+					case q"class Whatever[$myType]" => myType
+					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
+				}
+				val typ = types ++ List(newTypName1) //List(q"type FFunctor")// 
+				val typ2 = types ++ List(newTypName2) //List(q"type FFunctor2")//
+				val newtrait = newTypeName(traitname+"F")
+				//println("do we get here?")
+				val maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2]"
+				val newBody = List(maps)
+				//val body = q"" -- construct map
+				q"trait $newtrait[..$typ]{..$newBody}"
+			}  :: {
+				val newtrait = newTypeName(traitname+"F")
+
+				val typ = types ++ List(q"type $traitname[..$types]")
+				val newTypName1 = q"class Whatever[FFunctor]" match {
+					case q"class Whatever[$myType]" => myType
+					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
+				}
+				val newtyp = types ++ List(newTypName1)//List(q"type FFunctor")//
+				//val body = q"" -- construct fold	
+				
+				val folds = q"def fold[${newtyp.last}](phi: $newtrait[..$newtyp] => ${newtyp.last}): ${newtyp.last} = phi(this map (_ fold phi))"
+				val newBody = List(folds)
+				q"trait $traitname[..$types] extends $newtrait[..$typ]{..$newBody}" 
+			} :: modifyL(rest,y)
+			case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" :: rest =>{
+				//val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
+
+				//val typ = List(q"type FFunctor") ++ types 
+				//val typ2 = List(q"type FFunctor") ++ types2 
+				val newtrait = newTypeName(traitname+"F")
+				val newName = newTypeName(name+"F")
+				val newTypName1 = q"class Whatever[FFunctor]" match {
+					case q"class Whatever[$myType]" => myType
+					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
+				}
+				val newTypName2 = q"class Whatever[FFunctor2]" match {
+					case q"class Whatever[$myType]" => myType
+					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
+				}
+				val typ = types ++List(newTypName1)  //List(q"type FFunctor")//
+				val typ2 = types ++ List(newTypName2) //List(q"type FFunctor2") //
+				val fieldnames = listOf(fields)
+				val newFields = updateType(fields,traitname,types,"FFunctor")
+				  //case NilF() => NilF[T, M]()
+      //case ConsF(head, tail) => ConsF(head, g(tail))				
+				var maps= q"def map[M](g: FFunctor => M): ListsF[T, M] = NilF[T, M]()" //(..$fieldnames)"
+				if(fieldnames.length!=0)
+					maps = q"def map[M](g: FFunctor => M): ListsF[T, M] =  ConsF(head, g(tail))"
+				
+				//var maps= q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2] = $newName[..$typ2]()" //(..$fieldnames)"
+				//if(fieldnames.length!=0)
+				//	maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2] = $newName(..$fieldnames)"
+				val newBody = List(maps)
+
+				q"case class $newName[..$typ](..$newFields) extends $newtrait[..$typ]{..$newBody}"
+			} ::  {
+				//val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
+				val newtrait = newTypeName(traitname+"F")
+				val oldtrait = newTypeName(traitname+"") //not shure why I need to reconstruct this here
+				val newname = newTypeName(name+"F")
+				val typ = types ++ List(q"type $oldtrait[..$types]")
+				//causes stack overflow
+				q"class $name[..$types](..$fields) extends $newname[..$typ] with $traitname[..$types2]"
+			} :: 
+			{
+			    //causes stack overflow
+				//val bodyA = q"def apply[..$types](..$fields):$name[..$types] = new $name(..fields)"
+				//val bodyU = q"def unapply[..$types](..$fields):Option[] = Some()"
+				val nam = newTermName(name+"")
+				val fieldnames = listOf(fields)
+				val fieldSelects = listOfAsSelect(fields,"u")
+				val app = q"def apply[..$types](..$fields):$traitname[..$types] = new $name(..$fieldnames)"
+				val unapp = q"def unapply[..$types](u: $name[..$types]):Option[Unit] = Some((..$fieldSelects))"
+				val newBody = List(app) ++ List(unapp)
+				//println(theList)
+				q"object $nam{..$newBody}"
+			} ::  modifyL(rest,y) 
+			case a::b => a::modifyL(b,y)
+			case _ => x
+		}
+
 		val outputs = expandees
+		println("?"*50)
+		//println(q"new Cons(head, tail)")
+		//println(showRaw(q"new Cons(head, tail)"))
+		//println("analyze")
+		//analyze(expandees(0))
+		println("The Original")
+		println(outputs)
+		println("?"*50)
+		println("The Modified")
+		
+		println(modify(expandees(0),expandees))
+		
+		if(traitname!="FDefault"){}
+		//println(classes)
+		//println(showRaw(classes))
+		//println(analyze(expandees(0)))
+		//println(showRaw(expandees))
+		println("?"*50)
+		
+		
+		
+		
+		
+		//c.Expr[Any](Block(modify(expandees(0),expandees), Literal(Constant(()))))
 		c.Expr[Any](Block(outputs, Literal(Constant(()))))
-	}
+	}	
 }
 
-class appendLol extends StaticAnnotation {
-	def macroTransform(annottees: Any*) = macro appendLolMacro.impl
-}
 
-object appendLolMacro {
-	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
-		import c.universe._
-		println("="*75)
-		println(("="*29)+"Append Lol Makro"+("="*30))
-		println("="*75)
-		val inputs = annottees.map(_.tree).toList
-		val (annottee, expandees) = inputs match {
-		    case (param: ValDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case (param: TypeDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case _ => (EmptyTree, inputs)
-		}
-		def traverse(x:Tree):Tree = x match {
-			case ClassDef(a,b,c,d) => ClassDef(a,b,c,traverse(d).asInstanceOf[Template])
-			case Template(a,b,c) => Template(a,b,traverseL(c))
-			case ValDef(a,b,c,d) => ValDef(a,b+"lol",c,d)
-			case DefDef(a,b,c,List(d),e,f) => DefDef(a,b,c,List(traverseL(d).asInstanceOf[List[ValDef]]),e,traverse(f).asInstanceOf[Apply])
-			case DefDef(a,b,c,d,e,f) => DefDef(a,b,c,d,e,traverse(f).asInstanceOf[Apply])
-			case Apply(Select(a,b),c) => Apply(Select(traverse(a),b),traverseL(c))
-			case Apply(a,b) => Apply(traverse(a),traverseL(b))
-			case Select(a,b) => Select(a,traverseL(b.asInstanceOf[List[Tree]])(0).asInstanceOf[Symbol])
-			case Ident(a) => Ident(a+"lol")
-			case _ => x
-		}
-		
-		def traverseL(x:List[Tree]):List[Tree] = x match {
-			case y :: z => traverse(y) :: traverseL(z)
-			case _ => x
-		}
-		val newC = traverse(expandees(0))
-		println("During Compilation - this is Class C:")
-		println(expandees(0))
-		println("="*75)
-		println("During Compilation - this is the modified Class C:")
-		println(newC)
-		val outputs = List(newC)
-		c.Expr[Any](Block(outputs, Literal(Constant(()))))
-	}
-}
-
-class addMember extends StaticAnnotation {
-	def macroTransform(annottees: Any*) = macro addMemberMacro.impl
-}
-
-object addMemberMacro {
-	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
-		import c.universe._
-		println("="*75)
-		println(("="*29)+"Add Member makro"+("="*30))
-		println("="*75)
-		val inputs = annottees.map(_.tree).toList
-		val (annottee, expandees) = inputs match {
-		    case (param: ValDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case (param: TypeDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case _ => (EmptyTree, inputs)
-		}
-		def traverse(x:Tree):Tree = x match {
-			case ClassDef(a,b,c,d) => ClassDef(a,b,c,traverse(d).asInstanceOf[Template])
-			case Template(a,b,c) => Template(a,b,traverseL(c))
-			case _ => x
-		}
-		
-		def traverseL(x:List[Tree]):List[Tree] = x match {
-			case y :: List() => {y 	:: DefDef(Modifiers(), newTermName("foo"), List(), List(), TypeTree(), Literal(Constant("Hello World"))) ::	DefDef(Modifiers(), newTermName("bar"), List(), List(), TypeTree(), Literal(Constant(42))) :: List()}
-			case y :: z => y :: traverseL(z)
-			case _ => x
-		}
-		
-		println(traverse(expandees(0)))
-		
-		c.Expr[Any](Block(List(traverse(expandees(0))), Literal(Constant(()))))
-	}
-}
-class addMemberQuasi extends StaticAnnotation {
-	def macroTransform(annottees: Any*) = macro addMemberQuasiMacro.impl
-}
-
-object addMemberQuasiMacro {
-	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
-		import c.universe._
-		println("="*75)
-		println(("="*26)+"Add Quasi Member makro"+("="*27))
-		println("="*75)
-		val inputs = annottees.map(_.tree).toList
-		val (annottee, expandees) = inputs match {
-		    case (param: ValDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case (param: TypeDef) :: (rest @ (_ :: _)) => throw new Exception("Not Intended for this Use")
-			case _ => (EmptyTree, inputs)
-		}
-		def traverse(x:Tree):Tree = x match {
-			case ClassDef(a,b,c,d) => ClassDef(a,b,c,traverse(d).asInstanceOf[Template])
-			case Template(a,b,c) => Template(a,b,traverseL(c))
-			case _ => x
-		}
-		
-		def traverseL(x:List[Tree]):List[Tree] = x match {
-			case y :: List() => {y 	:: q"""def quasifoo = "Hello World" """ :: q"def quasibar = 42" :: List()}
-			case y :: z => y :: traverseL(z)
-			case _ => x
-		}
-		
-		println(traverse(expandees(0)))
-		
-		c.Expr[Any](Block(List(traverse(expandees(0))), Literal(Constant(()))))
-	}
-}
-
-//Example Hello World macros by Eugene Burmako
-//from the End To End Setup Examples
-object ExampleHello {
-  def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
-    import c.universe._
-    import Flag._
-    val result = {
-      annottees.map(_.tree).toList match {
-        case ModuleDef(mods, name, Template(parents, self, body)) :: Nil =>
-          val helloMethod = DefDef(NoMods, newTermName("hello"), List(), List(List()), TypeTree(), Literal(Constant("hello")))
-          ModuleDef(mods, name, Template(parents, self, body :+ helloMethod))
-      }
-    }
-    c.Expr[Any](result)
-  }
-}
-class ExampleHelloC extends StaticAnnotation {
-  def macroTransform(annottees: Any*) = macro ExampleHello.impl
-}
-object ExampleHelloWorld {
-  def impl(c: Context) = c.universe.reify(println("hello world!"))
-  def hello = macro impl
-}
