@@ -13,6 +13,7 @@ object Test extends App {
 	spts("hello")
 	}
 
+	
 @convert
 object ConvertMe{
   trait Lists[T]
@@ -22,3 +23,5 @@ object ConvertMe{
   case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
 
 }
+
+
