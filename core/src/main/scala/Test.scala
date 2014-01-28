@@ -14,7 +14,7 @@ object Test extends App {
 
   // test the dummy macro
 
-  ConvertMe.sayHello
+  ConvertMe.saySomething
 
   /* test case (not functional for the moment)
 

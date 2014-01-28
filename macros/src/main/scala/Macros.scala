@@ -7,11 +7,52 @@ class convert extends StaticAnnotation {
 }
 
 object convertMacro {
+
+
 	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
-
-
-
 		import c.universe._
+
+  case class FixedPoint(name: TypeName, typeParams: List[TypeDef])
+  case class Variant(
+    name: TypeName,
+    typeParams: List[TypeDef],
+    valParams: List[ValDef])
+
+
+  case class BusinessInput(
+    fixed: FixedPoint,
+    variants: List[Variant])
+
+
+  def businessLogic(input: BusinessInput): List[Tree] = {
+    List(q"""def ${newTermName(input.fixed.name.toString)} {
+      println("Goodbye cruel world!")
+    }""")
+  }
+
+  def extractDefList(x:Tree):List[Tree] = x match {
+    case ModuleDef(a,b,templ) => extractDefList(templ)
+    case Template(a,b,list) => list
+  }
+
+  def createInput(raw: List[Tree]): BusinessInput = {
+    // TODO: replace dummy input
+    BusinessInput(FixedPoint("saySomething", Nil), Nil)
+  }
+
+  def createOutput(original: Tree, newDefs: List[Tree]): Tree =
+    original match {
+      case mod @ ModuleDef(a, objectName, templ) =>
+        q"""
+         object $objectName {
+           ..${businessLogic(createInput(extractDefList(original)))}
+         }"""
+
+    }
+
+
+
+
 		val inputs = annottees.map(_.tree).toList
 		val (annottee, expandees) = inputs match {
 		    case (param: ValDef) :: (rest @ (_ :: _)) => (param, rest)
@@ -91,6 +132,9 @@ object convertMacro {
 		}	
 		def modifyL(x:List[Tree], y:List[Tree]):List[Tree] = x match {
 			case q"trait $traitname[..$types]" :: rest => {
+
+
+
 				val newTypName1 = q"class Whatever[FFunctor]" match {
 					case q"class Whatever[$myType]" => myType
 					case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
@@ -101,7 +145,8 @@ object convertMacro {
 				}
 				val typ = types ++ List(newTypName1) //List(q"type FFunctor")// 
 				val typ2 = cleanType(types ++ List(newTypName2)) //List(q"type FFunctor2")//
-				val newtrait = newTypeName(traitname+"F")
+				val newtrait =
+                                  newTypeName(traitname.toString+"F")
 				//println("do we get here?")
 				val maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2]"
 				val newBody = List(maps)
@@ -214,16 +259,11 @@ object convertMacro {
 
           // modified tree can't compile.
           // create dummy to test the waters.
-          val dummy: Tree = expandees.head match {
-            case mod @ ModuleDef(a, b, templ) =>
-              q"""
-              object $b {
-                def sayHello {
-                  println("Goodbye cruel world!")
-                }
-              }
-              """
-          }
+          val dummy: Tree =
+            createOutput(
+              expandees.head,
+              businessLogic(createInput(extractDefList(outputs.head))))
+
 
           c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
 
@@ -238,6 +278,9 @@ object convertMacro {
           //
 	  //c.Expr[Any](Block(outputs, Literal(Constant(()))))
 	}
+
+
+  //def businessLogic(input: BusinessInput): BusinessOutput =
+
+  //def businessLogic(c: Context): c.universe.Tree =
 }
-
-
