@@ -8,6 +8,9 @@ class convert extends StaticAnnotation {
 
 object convertMacro {
 	def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
+
+
+
 		import c.universe._
 		val inputs = annottees.map(_.tree).toList
 		val (annottee, expandees) = inputs match {
@@ -189,9 +192,13 @@ object convertMacro {
 		println("The Original")
 		println(outputs)
 		println("?"*50)
+
+	        val modified = modify(expandees(0),expandees)
+
+                println("?"*50)
 		println("The Modified")
 		
-		println(modify(expandees(0),expandees))
+		println(modified)
 		
 		if(traitname!="FDefault"){}
 		//println(classes)
@@ -199,14 +206,38 @@ object convertMacro {
 		//println(analyze(expandees(0)))
 		//println(showRaw(expandees))
 		println("?"*50)
-		
-		
-		
-		
-		
-		//c.Expr[Any](Block(modify(expandees(0),expandees), Literal(Constant(()))))
-		c.Expr[Any](Block(outputs, Literal(Constant(()))))
-	}	
+
+
+	  // DEBUG
+          println("\n\nANNOTTEES:")
+          println(annottees)
+
+          // modified tree can't compile.
+          // create dummy to test the waters.
+          val dummy: Tree = expandees.head match {
+            case mod @ ModuleDef(a, b, templ) =>
+              q"""
+              object $b {
+                def sayHello {
+                  println("Goodbye cruel world!")
+                }
+              }
+              """
+          }
+
+          c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
+
+          // this dumps modified version out.
+          // there's some issue with generated definitions.
+          // how about starting small, injecting & testing 1
+          // definition at a time?
+          //
+          // c.Expr[Any](Block(List(modified), Literal(Constant(()))))
+
+          // this dumps input back, modifying nothing
+          //
+	  //c.Expr[Any](Block(outputs, Literal(Constant(()))))
+	}
 }
 
 
