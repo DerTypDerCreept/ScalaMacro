@@ -11,9 +11,9 @@ object Helper{
 object Test extends App {
     import Helper.spts
 	spts("hello")
+	ConvertMe.saySomething
 	}
 
-	
 @convert
 object ConvertMe{
   trait Lists[T]
