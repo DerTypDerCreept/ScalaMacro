@@ -18,8 +18,7 @@ object convertMacro {
     
 
   def extractDefList(x:Tree):List[Tree] = x match {
-    case ModuleDef(a,b,templ) => extractDefList(templ)
-    case Template(a,b,list) => list
+    case ModuleDef(a, b, Template(_, _, list)) => list
   }
     def findFixedPoint(raw: List[Tree]): FixedPoint = raw match {
         case q"trait $traitname[..$types]" :: tail => FixedPoint(traitname,types)
@@ -27,7 +26,9 @@ object convertMacro {
         case _ => throw new Exception("Could not find Fixed Point (no trait in annotated object)")
     }
     def findVariants(raw: List[Tree], fixed: TypeName): List[Variant] = { val fix = fixed; raw match{
-        case q"case class $name[..$types](..$fields) extends $fix" :: tail => Variant(name,types,fields) :: findVariants(tail,fixed)
+        case q"case class $name[..$types](..$fields) extends $fix" :: tail
+            if fix == fixed =>
+          Variant(name,types,fields) :: findVariants(tail,fixed)
         case head :: tail => findVariants(tail,fixed)
         case Nil => Nil
         case _ => throw new Exception("Find Variants Malfunctioned")
@@ -99,20 +100,10 @@ object convertMacro {
 	}
 
   def businessLogic(input: BusinessInput): List[Tree] = {
-    List(q"""def ${newTermName(input.fixed.name.toString)} {
-      println("Goodbye cruel world!")
-    }""")
-  }
-  def businessLogicWIP(input: BusinessInput): List[Tree] = {
     expandFixedPoint(input.fixed)
   }
 
   def createInput(raw: List[Tree]): BusinessInput = {
-    // TODO: replace dummy input
-    BusinessInput(FixedPoint("saySomething", Nil), Nil)
-  }
-  def createInputWIP(raw: List[Tree]): BusinessInput = {
-    // TODO: replace dummy input
     val fixed = findFixedPoint(raw)
     BusinessInput(fixed, findVariants(raw,fixed.name))
   }
@@ -270,30 +261,16 @@ object convertMacro {
         //println(analyze(expandees(0)))
         //println(showRaw(expandees))
         println("?"*50)
-			println(businessLogicWIP(createInputWIP(extractDefList(expandees(0)))))
-        /*
-        val dummy: Tree = expandees.head match {
-            case mod @ ModuleDef(a, b, templ) =>
-              q"""
-              object $b {
-                def sayHello {
-                  println("Goodbye cruel world!")
-                }
-              }
-              """
-          }
-          */
-            val dummy: Tree =
-            createOutput(
-              expandees.head,
-              businessLogic(createInput(extractDefList(outputs.head))))
 
-            println(dummy)
-          c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
-        
-        
-        //c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
-        //c.Expr[Any](Block(outputs, Literal(Constant(()))))
+      println(businessLogic(createInput(extractDefList(expandees(0)))))
+
+      val output: Tree =
+        createOutput(
+          expandees.head,
+          businessLogic(createInput(extractDefList(outputs.head))))
+
+      println(output)
+      c.Expr[Any](Block(List(output), Literal(Constant(()))))
     }    
 }
 
