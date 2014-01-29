@@ -27,13 +27,19 @@ object convertMacro {
     }
     def findVariants(raw: List[Tree], fixed: TypeName): List[Variant] = { val fix = fixed; raw match{
         case q"case class $name[..$types](..$fields) extends $fix" :: tail
-            if fix == fixed =>
+            if getTypeConstructorName(fix) == fixed =>
           Variant(name,types,fields) :: findVariants(tail,fixed)
         case head :: tail => findVariants(tail,fixed)
         case Nil => Nil
         case _ => throw new Exception("Find Variants Malfunctioned")
     } }
 	//Helper Functions
+    // obtain the name of the top-level type constructor
+    def getTypeConstructorName(fix: Tree): TypeName = fix match {
+      case s: TypeName => s
+      case AppliedTypeTree(Ident(s: TypeName), _) => s
+    }
+
         //clean Type turns type defunitions into type references
         def cleanType(x:List[Tree]):List[Tree] = x match {
             case TypeDef(a,b,List(),d) :: rest => Ident(b) :: cleanType(rest)
@@ -105,6 +111,14 @@ object convertMacro {
 
   def createInput(raw: List[Tree]): BusinessInput = {
     val fixed = findFixedPoint(raw)
+    val variants = findVariants(raw, fixed.name)
+
+    println("========")
+    println("VARIANTS")
+    println("========")
+    println(variants)
+    println("========")
+
     BusinessInput(fixed, findVariants(raw,fixed.name))
   }
 
