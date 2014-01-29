@@ -11,23 +11,9 @@ object Helper{
 object Test extends App {
     import Helper.spts
 	spts("hello")
+	ConvertMe.saySomething
+	}
 
-  // test the dummy macro
-
-  ConvertMe.saySomething
-
-  /* test case (not functional for the moment)
-
-  import ConvertMe._
-
-  def sum(xs: Lists[Int]): Int = xs.fold[Int] {
-    case NilF() => 0
-    case ConsF(n, m) => n + m
-  }
-   */
-}
-
-	
 @convert
 object ConvertMe{
   trait Lists[T]
