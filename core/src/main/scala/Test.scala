@@ -8,20 +8,25 @@ object Helper{
 	def spts(text: String) = pts(text,"=",75)
 }
 
+
+
+
+
 object Test extends App {
     import Helper.spts
 	spts("hello")
-	ConvertMe.saySomething
+	//ConvertMe.saySomething
 	}
 
+	
 @convert
 object ConvertMe{
   trait Lists[T]
 
   // a case class with a name as argument is always bound
-  case class Nil[T] extends Lists[T]
-  case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
-
+  //case class Nil[T] extends Lists[T]
+  //case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
+  //case class Whatevs[T](smthing:T)
 }
 
 

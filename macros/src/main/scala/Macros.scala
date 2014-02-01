@@ -10,57 +10,71 @@ object convertMacro {
     def impl(c: Context)(annottees: c.Expr[Any]*): c.Expr[Any] = {
         import c.universe._
         
+	//The new interface
+	//represents the trait, we wish to treat as the fixed Point
     case class FixedPoint(name: TypeName, typeParams: List[TypeDef])
+	//represents a case class
     case class Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
-
-
+	//contains a FixedPoint and a list of variants
     case class BusinessInput(fixed: FixedPoint, variants: List[Variant])
     
-
+	//extracts the body of a ModuleDef
   def extractDefList(x:Tree):List[Tree] = x match {
-    case ModuleDef(a,b,templ) => extractDefList(templ)
-    case Template(a,b,list) => list
+    case ModuleDef(a, b, Template(_, _, list)) => list
+	case _ => throw new Exception("Could not extract Def List from"+x)
   }
+	//takes a list of Trees and returns the first trait
+	//as an instance of FixedPoint
     def findFixedPoint(raw: List[Tree]): FixedPoint = raw match {
         case q"trait $traitname[..$types]" :: tail => FixedPoint(traitname,types)
         case head :: tail => findFixedPoint(tail)
         case _ => throw new Exception("Could not find Fixed Point (no trait in annotated object)")
     }
-    def findVariants(raw: List[Tree], fixed: TypeName): List[Variant] = { val fix = fixed; raw match{
-        case q"case class $name[..$types](..$fields) extends $fix" :: tail => Variant(name,types,fields) :: findVariants(tail,fixed)
+	//takes a list of Trees  and the name of a Type
+	//and filters the list for case classes extending the given type
+	//turning them into Variants
+    def findVariants(raw: List[Tree], fixed: TypeName): List[Variant] = raw match{
+        case q"case class $name[..$types](..$fields) extends $fix[..$smth]" :: tail
+          if fix+"" == fixed+"" => 
+			Variant(name,types,fields) :: findVariants(tail,fixed)
         case head :: tail => findVariants(tail,fixed)
         case Nil => Nil
         case _ => throw new Exception("Find Variants Malfunctioned")
-    } }
+    }
 	//Helper Functions
-        //clean Type turns type defunitions into type references
-        def cleanType(x:List[Tree]):List[Tree] = x match {
-            case TypeDef(a,b,List(),d) :: rest => Ident(b) :: cleanType(rest)
-            case TypeDef(a,b,c,d) :: rest => AppliedTypeTree(Ident(b),cleanType(c)) :: cleanType(rest)
-            case AppliedTypeTree(a,b) :: rest => AppliedTypeTree(a,cleanType(b)) :: cleanType(rest)
+        //clean Type takes a list of TypeDefs or AppliedTrees and
+		//returns a list of references to these types
+        def typeDefsToTypeRefs(x:List[Tree]):List[Tree] = x match {
+            case TypeDef(a,b,List(),d) :: rest => Ident(b) :: typeDefsToTypeRefs(rest)
+            case TypeDef(a,b,c,d) :: rest => AppliedTypeTree(Ident(b),typeDefsToTypeRefs(c)) :: typeDefsToTypeRefs(rest)
+            case AppliedTypeTree(a,b) :: rest => AppliedTypeTree(a,typeDefsToTypeRefs(b)) :: typeDefsToTypeRefs(rest)
             case _ => x
             }
-        //listOfApply takes a list of valDefs, a type reference and a function name
-        //                    and returns a List where ValDefs are replaced with a reference to them
-        //                    except for when they match the given type, then the function is applied to the valDef
-        def listOfApply(x:List[ValDef], typ:Tree, funName:Ident ):List[Tree] = x match {
-            //case ValDef(a,b,`typ`,d) :: z => Apply(funName,List(Ident(b))) :: listOfApply(z,typ,funName) 
+        //applyDefinedValsOfTypeTo takes a list of valDefs, a type reference and a function name
+        //                    and returns a List, where ValDefs are replaced with a reference to them
+        //                    except for when the parameters they define are of the given type, then the
+		//				      function is applied to the parameter defined by the current ValDef
+        def applyDefinedValsOfTypeTo(x:List[ValDef], typ:Tree, funName:Ident ):List[Tree] = x match {
+            //case ValDef(a,b,`typ`,d) :: z => Apply(funName,List(Ident(b))) :: applyDefinedValsOfTypeTo(z,typ,funName) 
             case ValDef(a,b,c,d) :: z => {
-                if (c.canEqual(typ)) Apply(funName,List(Ident(b))) :: listOfApply(z,typ,funName)
-                else Ident(b) :: listOfApply(z,typ,funName) 
+                if (c.canEqual(typ)) Apply(funName,List(Ident(b))) :: applyDefinedValsOfTypeTo(z,typ,funName)
+                else Ident(b) :: applyDefinedValsOfTypeTo(z,typ,funName) 
             }
             case Nil => Nil
         }
-        //listOf takes a list of valDefs and returns a list of references to them
-        def listOf(x:List[ValDef]):List[Ident] = x match {
-            case ValDef(a,b,c,d) :: z => Ident(b) :: listOf(z) 
+        //valDefsToValRefs takes a list of valDefs and returns a list of references to the parameters
+		//defined by them (wrapping their names in Idents)
+        def valDefsToValRefs(x:List[ValDef]):List[Ident] = x match {
+            case ValDef(a,b,c,d) :: z => Ident(b) :: valDefsToValRefs(z) 
             case Nil => Nil
         }
-        //listOfAsSelect
-        def listOfAsSelect(x:List[ValDef], modification: String):List[Select] = x match {
+        //valDefsToSelect
+		//takes a list of ValDefs and a String and returns a list of selects, selecting the parameters
+		//defined by the ValDefs from a term with the given String as its name
+        def valDefsToSelect(x:List[ValDef], modification: String):List[Select] = x match {
             case ValDef(a,b,c,d) :: z => {
                 val tmp=newTermName(modification); 
-                q"$tmp.$b" :: listOfAsSelect(z,modification)} 
+                q"$tmp.$b" :: valDefsToSelect(z,modification)} 
             case Nil => Nil
         }
         //updateType
@@ -76,48 +90,111 @@ object convertMacro {
             case _ => x
         }
 	def expandFixedPoint(fixed: FixedPoint):List[Tree] = {
+		//the additional type parameter
 		val fixedType1 = q"type FFunctor"
+		//the additional type parameter for the abstract map definition
 		val fixedType2 = q"type FFunctor2"
+		//the additional type parameter for the fold definition 
 		val fixedType3 = q"type FFunctor3"
+		//the name for the Fixed Point trait (original name with appended F)
 		val newTraitName = newTypeName(fixed.name.toString+"F")
+		//the type parameters for the Fixed Point trait
 		val newTypeList = fixed.typeParams ++ List(fixedType1)
-		val newTypeReferences2 = cleanType(fixed.typeParams ++ List(fixedType2))
-		val newTypeReferences3 = cleanType(fixed.typeParams ++ List(fixedType3))
+		//the type parameters of the map definition as references
+		val newTypeReferences2 = typeDefsToTypeRefs(fixed.typeParams ++ List(fixedType2))
+		//the type parameters of the fold function as references
+		val newTypeReferences3 = typeDefsToTypeRefs(fixed.typeParams ++ List(fixedType3))
+		//the map function definition
         val maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newTraitName[..$newTypeReferences2]"
         val newBodyFixed = List(maps)
-		
-		
-        val extendTypes = cleanType(fixed.typeParams ++ List(q"type ${fixed.name}[..${fixed.typeParams}]"))        
+		//the new type params of the the original trait
+        val extendTypes = typeDefsToTypeRefs(fixed.typeParams ++ List(q"type ${fixed.name}[..${fixed.typeParams}]"))
+		//the fold definition 
         val folds = q"def fold[$fixedType3](phi: $newTraitName[..$newTypeReferences3] => ${newTypeReferences3.last}): ${newTypeReferences3.last} = phi(this map (_ fold phi))"
         val newBody = List(folds)
         
+		//the goal of all this, the fixed point trait and the original trait that now extends it
         val traitFixed = List(q"trait $newTraitName[..$newTypeList]{..$newBodyFixed}")
 		val traitNormal = List(q"trait ${fixed.name}[..${fixed.typeParams}] extends $newTraitName[..$extendTypes]{..$newBody}")
 		
 		traitFixed ++ traitNormal
 		
 	}
+	//Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
+	def expandVariant(variant:Variant, fixed:FixedPoint) = {
+	    //the name for the fixed point (traitnameF)
+        val newtrait = newTypeName(fixed.name+"F")
+		//the name of the original trait (which will now extend the new trait)
+        val oldtrait = newTypeName(fixed.name+"")
+		//The additional type parameter
+		val fixedType1 = q"type FFunctor"
+		//The additional type parameter for the map functions
+		val fixedType2 = q"type FFunctor2"
+		//
+		//val fixedType3 = q"type FFunctor3"
+		//The new txpe needed for the case class
+        val typeRef = typeDefsToTypeRefs(List(q"type $oldtrait[..${variant.typeParams}]"))
+		//the name of the case class
+        val newName = newTypeName(variant.name+"F")
+		//the name of the case class as a Termname, needed for the map(case class) and apply(object) function 
+        val newNameTerm = Ident(newTermName(variant.name+"F"))
+		//the name of the Object
+		val nameTerm = newTermName(variant.name+"")
+		//the name of the normal class (and needed for the unapply fuction)
+		val oldName = newTypeName(variant.name+"")
+		//the type params for the case class
+        val updatedTypeParams = variant.typeParams ++List(fixedType1)  //List(q"type FFunctor")//
+		//part of the return type (and result) of the map function
+        val mapType = typeDefsToTypeRefs(variant.typeParams ++ List(fixedType2)) //List(q"type FFunctor2") //
+        //the name of the parameters. devoid of their type, used on multiple occasions
+		val paramReferences = valDefsToValRefs(variant.valParams)
+		//for the map function it is necessary to apply the function to parameters of the correct type
+        val appliedParams = applyDefinedValsOfTypeTo(variant.valParams,typeRef.head,Ident(newTermName("g")))
+		//the parameters of the case class need to be updated to the correct type
+        val newParams = updateType(variant.valParams,Ident(oldtrait),variant.typeParams,"FFunctor")
+        //the map function for the case classes
+		var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = $newNameTerm[..$mapType]()" //(..$fieldnames)"
+        if(paramReferences.length!=0)
+			mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = ${Ident(newName)}(..$appliedParams)"
+        val mapBody = List(mapFun)
+		//the type params of the class as references for the apply and unapply functions
+	    val typeRefs = typeDefsToTypeRefs(variant.typeParams)
+		//the type that the normal class extends if there are parameters 
+        val extendType = q"${Ident(newName)}(..$paramReferences)"
+		//part of the type of the normal class, if there are no parameters
+        val extendTypeParams = typeRefs ++ typeRef
+		//for the unapply function, the parameters need to be selected 
+        val paramsSelect = valDefsToSelect(variant.valParams,"u")
+		//the apply function of the object
+        val app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new $newNameTerm(..$paramReferences)"
+        //the unapply function of the object
+		val unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[Unit] = Some((..$paramsSelect))"
+        val objectBody = List(app) ++ List(unapp)        
+		//the purpose of all this, the case class, normal class and its companion object
+		val caseClass = q"case class $newName[..$updatedTypeParams](..$newParams) extends $newtrait[..${typeDefsToTypeRefs(updatedTypeParams)}]{..$mapBody}"
+		val classClass = if(paramReferences.length<1) q"class $oldName[..${variant.typeParams}](..${variant.valParams}) extends $newName[..$extendTypeParams] with $oldtrait[..${variant.typeParams}]"
+						 else q"class ${variant.name}[..${variant.typeParams}](..${variant.valParams}) extends $extendType with $oldtrait[..${variant.typeParams}]"
+        val objectObject = q"object $nameTerm{..$objectBody}"
+		//return the three definitions
+		List(caseClass) ++ List(classClass) ++ List(objectObject)
+    }
 
   def businessLogic(input: BusinessInput): List[Tree] = {
-    List(q"""def ${newTermName(input.fixed.name.toString)} {
-      println("Goodbye cruel world!")
-    }""")
-  }
-  def businessLogicWIP(input: BusinessInput): List[Tree] = {
-    expandFixedPoint(input.fixed)
+
+	val y = input.variants.iterator
+	var result = expandFixedPoint(input.fixed)
+	while(y.hasNext)
+		result = result ++ expandVariant(y.next,input.fixed)
+	result
   }
 
   def createInput(raw: List[Tree]): BusinessInput = {
     // TODO: replace dummy input
-    BusinessInput(FixedPoint("saySomething", Nil), Nil)
-  }
-  def createInputWIP(raw: List[Tree]): BusinessInput = {
-    // TODO: replace dummy input
     val fixed = findFixedPoint(raw)
     BusinessInput(fixed, findVariants(raw,fixed.name))
   }
-
-  def createOutput(original: Tree, newDefs: List[Tree]): Tree =
+  
+  def createOutput(original: Tree): Tree =
     original match {
       case mod @ ModuleDef(a, objectName, templ) =>
         q"""
@@ -126,8 +203,6 @@ object convertMacro {
          }"""
 
     }
-
-        
         
         val inputs = annottees.map(_.tree).toList
         val (annottee, expandees) = inputs match {
@@ -135,162 +210,50 @@ object convertMacro {
             case (param: TypeDef) :: (rest @ (_ :: _)) => (param, rest)
             case _ => (EmptyTree, inputs)
         }
-        
-        
-        def modify(x:Tree):Tree = x match {
-            case ModuleDef(a,b,templ) => ModuleDef(a,b,modify(templ).asInstanceOf[Template])
-            case Template(a,b,list) => Template(a,b,modifyL(list))
+        def modify2(x:Tree,original:Tree):Tree = x match {
+            case ModuleDef(a,b,templ) => ModuleDef(a,b,modify2(templ,original).asInstanceOf[Template])
+            case Template(a,b,list) => Template(a,b,businessLogic(createInput(extractDefList(original))))
             case _ => x
-        }    
-        def modifyL(x:List[Tree]):List[Tree] = x match {
-            case q"trait $traitname[..$types]" :: rest => {
-                val newTypName1 = q"class Whatever[FFunctor]" match {
-                    case q"class Whatever[$myType]" => myType
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val newTypName2 = q"class Whatever[FFunctor2]" match {
-                    case q"class Whatever[$myType]" => myType
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val typ = types ++ List(newTypName1) //List(q"type FFunctor")// 
-                val typ2 = cleanType(types ++ List(newTypName2)) //List(q"type FFunctor2")//
-                val newtrait = newTypeName(traitname+"F")
-                //println("do we get here?")
-                val maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2]"
-                val newBody = List(maps)
-                //val body = q"" -- construct map
-                q"trait $newtrait[..$typ]{..$newBody}"
-            }  :: {
-                val newtrait = newTypeName(traitname+"F")
-
-                val typ = cleanType(types ++ List(q"type $traitname[..$types]"))
-                val newTypName1 = q"class Whatever[FFunctor3]" match {
-                    case q"class Whatever[$myType]" => myType
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val newtyp = cleanType(types ++ List(newTypName1))//List(q"type FFunctor")//
-                //val body = q"" -- construct fold    
-                
-                val folds = q"def fold[$newTypName1](phi: $newtrait[..$newtyp] => ${newtyp.last}): ${newtyp.last} = phi(this map (_ fold phi))"
-                val newBody = List(folds)
-                q"trait $traitname[..$types] extends $newtrait[..$typ]{..$newBody}" 
-            } :: modifyL(rest)
-            case q"case class $name[..$types](..$fields) extends $traitname[..$types2]" :: rest =>{
-                val newtrait = newTypeName(traitname+"F")
-                val oldtrait = newTypeName(traitname+"")
-                val typeRef = cleanType(List(q"type $oldtrait[..$types]"))
-                val newName = newTypeName(name+"F")
-                val newNameTerm = Ident(newTermName(name+"F"))
-                val newTypName1 = q"class Whatever[FFunctor]" match {
-                    case q"class Whatever[$myType]" => myType
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val newTypName2 = q"class Whatever[FFunctor2]" match {
-                    case q"class Whatever[$myType]" => myType
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val typ = types ++List(newTypName1)  //List(q"type FFunctor")//
-                val typ2 = cleanType(types ++ List(newTypName2)) //List(q"type FFunctor2") //
-                val fieldnames = listOf(fields)
-                val fieldnames2 = listOfApply(fields,typeRef.head,Ident(newTermName("g")))
-                val newFields = updateType(fields,traitname,types,"FFunctor")
-                
-                var maps= q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2] = $newNameTerm[..$typ2]()" //(..$fieldnames)"
-                if(fieldnames.length!=0)
-                    maps = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$typ2] = ${Ident(newName)}(..$fieldnames2)"
-                val newBody = List(maps)
-
-                q"case class $newName[..$typ](..$newFields) extends $newtrait[..${cleanType(typ)}]{..$newBody}"
-            } ::  {
-                //val typ = List(Ident(newTypeName("FFunctor"))) ++ types2
-                //val newtrait = newTypeName(traitname+"F")
-                //val oldtrait = newTypeName(traitname+"")
-                
-                val fieldnames = listOf(fields)
-                val newNameType = Ident(newTypeName(name+"F"))
-                //val newNameType = Ident(newTermName(name+"F"))
-                //val app = q"$newNameTerm(..$fieldnames)"
-                val tt = q"$newNameType(..$fieldnames)"
-                println("::"+tt)
-                val xxx=q"class Cons[T](head: T, tail: List[T]) extends ConsFs(heads, tails) with List[T]" match{
-                    case q"class Cons[T](head: T, tail: List[T]) extends $xx(..$xxs) with List[T]" =>{
-                    //case q"class Cons[T](head: T, tail: List[T]) extends $xx with List[T]" =>{
-                    println(";"*75)
-                    println(showRaw(xx))
-                    //println(showRaw(xxs))
-                    println(showRaw(fieldnames))
-                    println(showRaw(newNameType))
-                    }
-                    case _ => println("hm")
-                }
-                
-                val newname = newTypeName(name+"F")
-                val typ2 = q"class Whatever extends $traitname[..$types]" match {
-                    case q"class Whatever extends $type2" => List(type2)
-                    case _ => throw new Exception("[Convert Macro]:Could not construct type by QuasiquoteMatching")
-                }
-                val typ = cleanType(types ++ typ2)
-                //causes stack overflow
-                if(fieldnames.length<1)    q"class $name[..$types](..$fields) extends $newname[..$typ] with $traitname[..$types2]"
-                else q"class $name[..$types](..$fields) extends $tt with $traitname[..$types2]"
-            
-            } :: 
-            {
-                val nam = newTermName(name+"")
-                val fieldnames = listOf(fields)
-                val fieldSelects = listOfAsSelect(fields,"u")
-                val newNameTerm = Ident(newTermName(name+""))
-                val newTypes = cleanType(types)
-                val app = q"def apply[..$types](..$fields):$traitname[..$newTypes] = new $newNameTerm(..$fieldnames)"
-                val unapp = q"def unapply[..$types](u: $name[..$newTypes]):Option[Unit] = Some((..$fieldSelects))"
-                val newBody = List(app) ++ List(unapp)
-                //println(theList)
-                q"object $nam{..$newBody}"
-            } ::  modifyL(rest) 
-            case a::b => a::modifyL(b)
-            case _ => x
-        }
+        }  
+        
 
         val outputs = expandees
         println("?"*50)
-        //println(q"new Cons(head, tail)")
-        //println(showRaw(q"new Cons(head, tail)"))
-        //println("analyze")
-        //analyze(expandees(0))
         println("The Original")
         println(outputs)
         println("?"*50)
         println("The Modified")
         //val res = modify(expandees(0))
         //println(res)
-        
-        //if(traitname!="FDefault"){}
-        //println(classes)
-        //println(showRaw(classes))
-        //println(analyze(expandees(0)))
-        //println(showRaw(expandees))
+		val res = createOutput(expandees(0)) 
+        println(res)
+		println("?"*50)
+		println("run typeCheck")
+		val res2 = c.typeCheck(Block(List(res), Literal(Constant(()))))
+		println(res2)
         println("?"*50)
-			println(businessLogicWIP(createInputWIP(extractDefList(expandees(0)))))
-        /*
-        val dummy: Tree = expandees.head match {
-            case mod @ ModuleDef(a, b, templ) =>
-              q"""
-              object $b {
-                def sayHello {
-                  println("Goodbye cruel world!")
-                }
-              }
-              """
-          }
-          */
-            val dummy: Tree =
-            createOutput(
-              expandees.head,
-              businessLogic(createInput(extractDefList(outputs.head))))
-
-            println(dummy)
-          c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
+		println("returning result now")
+			//println(createOutput(expandees(0), Nil))
+			
+			//println(modify2(expandees(0),expandees(0)))
+			//println(businessLogicWIP(createInputWIP(extractDefList(expandees(0)))))
+			//println(modify(expandees(0)))
         
+	val a = q"""abstract trait ListsF[T,FFunctor] {
+    def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2]
+  };"""	
+	val b = q"""abstract trait Lists[T] extends ListsF[T, Lists[T]] {
+    def fold[FFunctor3](phi: ListsF[T, FFunctor3] => FFunctor3): FFunctor3 = phi(this.map(( _ fold phi)))
+  };"""
+  val ll = List(a) ++ List(b)
+  val res3 = q"""object ConvertMe {..$ll}"""
+  println(res3)
+  //println(res.tpe+" vs "+ res3.tpe)
+
+        //c.Expr[Any](Block(expandees, Literal(Constant(()))))
+        //c.Expr[Any](Block(List(res), Literal(Constant(()))))
+        c.Expr[Any](res3)
+		
         
         //c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
         //c.Expr[Any](Block(outputs, Literal(Constant(()))))
