@@ -231,17 +231,17 @@ object convertMacro {
         val outputs = expandees
         println("?"*50)
         println("The Original")
-        println(outputs)
+        //println(outputs)
         println("?"*50)
         println("The Modified")
         //val res = modify(expandees(0))
         //println(res)
 		val res = createOutput(expandees(0)) 
-        println(showRaw(res))
+        //println(showRaw(res))
 		println("?"*50)
 		println("run typeCheck")
-		val res2 = c.typeCheck(Block(List(res), Literal(Constant(()))))
-		println(res2)
+		//val res2 = c.typeCheck(Block(List(res), Literal(Constant(()))))
+		//println(res2)
         println("?"*50)
 		println("returning result now")
 			//println(createOutput(expandees(0), Nil))
@@ -249,7 +249,7 @@ object convertMacro {
 			//println(modify2(expandees(0),expandees(0)))
 			//println(businessLogicWIP(createInputWIP(extractDefList(expandees(0)))))
 			//println(modify(expandees(0)))
-        
+     /*   
 	val a = q"""abstract trait ListsF[T,FFunctor] {
     def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2]
   };"""	
@@ -260,11 +260,12 @@ object convertMacro {
   val res3 = q"""object ConvertMe {..$ll}"""
   println(showRaw(res3))
   if(res.equalsStructure(res3)) println("They are equal lol")
+  */
   //println(res.tpe+" vs "+ res3.tpe)
 
         //c.Expr[Any](Block(expandees, Literal(Constant(()))))
         //c.Expr[Any](Block(List(res), Literal(Constant(()))))
-        c.Expr[Any](res3)
+        c.Expr[Any](res)
 		
         
         //c.Expr[Any](Block(List(dummy), Literal(Constant(()))))
