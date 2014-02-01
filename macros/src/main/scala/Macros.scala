@@ -26,7 +26,7 @@ object convertMacro {
 	//takes a list of Trees and returns the first trait
 	//as an instance of FixedPoint
     def findFixedPoint(raw: List[Tree]): FixedPoint = raw match {
-        case q"trait $traitname[..$types]" :: tail => FixedPoint(traitname,types)
+        case q"trait $traitname[..$types]" :: tail => FixedPoint(traitname,reconstructTypes(types).asInstanceOf[List[TypeDef]])
         case head :: tail => findFixedPoint(tail)
         case _ => throw new Exception("Could not find Fixed Point (no trait in annotated object)")
     }
@@ -41,6 +41,17 @@ object convertMacro {
         case Nil => Nil
         case _ => throw new Exception("Find Variants Malfunctioned")
     }
+	
+	def reconstructTypes(x:List[Tree]):List[Tree] = x match{
+		case TypeDef(a,b,c,d) :: tail => TypeDef(a,b,c,reconstructTypesSub(d)) :: reconstructTypes(tail)
+		case AppliedTypeTree(a,b) :: tail => AppliedTypeTree(reconstructTypes(List(a)).head,reconstructTypes(b)) :: reconstructTypes(tail)
+		case Nil => Nil
+	}
+	def reconstructTypesSub(x:Tree):Tree = x match{
+		case TypeBoundsTree(Select(Select(a, b), c), Select(Select(d,e), f)) => TypeBoundsTree(Select(Select(a, newTermName(b.toString)), c), Select(Select(d,newTermName(e.toString)), f))
+        case _ => x		
+	}
+	
 	//Helper Functions
         //clean Type takes a list of TypeDefs or AppliedTrees and
 		//returns a list of references to these types
@@ -226,7 +237,7 @@ object convertMacro {
         //val res = modify(expandees(0))
         //println(res)
 		val res = createOutput(expandees(0)) 
-        println(res)
+        println(showRaw(res))
 		println("?"*50)
 		println("run typeCheck")
 		val res2 = c.typeCheck(Block(List(res), Literal(Constant(()))))
@@ -247,7 +258,8 @@ object convertMacro {
   };"""
   val ll = List(a) ++ List(b)
   val res3 = q"""object ConvertMe {..$ll}"""
-  println(res3)
+  println(showRaw(res3))
+  if(res.equalsStructure(res3)) println("They are equal lol")
   //println(res.tpe+" vs "+ res3.tpe)
 
         //c.Expr[Any](Block(expandees, Literal(Constant(()))))
