@@ -246,7 +246,7 @@ object convertMacro {
             case _ => x
         }  
         
-
+		val res = createOutput(expandees(0))
         val outputs = expandees
 		println("?"*50)
 		println(res)
