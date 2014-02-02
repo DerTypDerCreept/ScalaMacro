@@ -35,8 +35,8 @@ object convertMacro {
 	//turning them into Variants
     def findVariants(raw: List[Tree], fixed: TypeName): List[Variant] = raw match{
         case q"case class $name[..$types](..$fields) extends $fix[..$smth]" :: tail
-          if fix+"" == fixed+"" => 
-			Variant(name,types,fields) :: findVariants(tail,fixed)
+          if fix.toString == fixed.toString => 
+			Variant(name,reconstructTypes(types).asInstanceOf[List[TypeDef]],fields) :: findVariants(tail,fixed)
         case head :: tail => findVariants(tail,fixed)
         case Nil => Nil
         case _ => throw new Exception("Find Variants Malfunctioned")
@@ -45,6 +45,9 @@ object convertMacro {
 	def reconstructTypes(x:List[Tree]):List[Tree] = x match{
 		case TypeDef(a,b,c,d) :: tail => TypeDef(a,b,c,reconstructTypesSub(d)) :: reconstructTypes(tail)
 		case AppliedTypeTree(a,b) :: tail => AppliedTypeTree(reconstructTypes(List(a)).head,reconstructTypes(b)) :: reconstructTypes(tail)
+		//case AppliedTypeTree(Select(Select(a, b), c), d) :: tail => AppliedTypeTree(Select(Select(a, newTermName(b.toString)), c), d) :: reconstructTypes(tail) 
+		//case Select(Select(a, b), c) :: tail => Select(Select(a, newTermName(b.toString)), c) :: reconstructTypes(tail) 
+		case head :: tail => head :: reconstructTypes(tail)
 		case Nil => Nil
 	}
 	def reconstructTypesSub(x:Tree):Tree = x match{
@@ -93,8 +96,8 @@ object convertMacro {
             case ValDef(a,b,c,d) :: z => {
                 //println(showRaw(c))
                 q"class ignoreMe extends $c" match {
-                    case q"class ignoreMe extends $name[..$types]" => ValDef(a,b,Ident(newTypeName(newType+"")),d) :: updateType(z,name,types,newType+"") 
-                    case _ => ValDef(a,b,c,d) :: updateType(z,name,types,newType+"")
+                    case q"class ignoreMe extends $name2[..$types2]" if(name.toString==name2.toString && types.toString==types2.toString) => ValDef(a,b,Ident(newTypeName(newType.toString)),d) :: updateType(z,name,types,newType.toString) 
+                    case _ => ValDef(a,b,c,d) :: updateType(z,name,types,newType.toString)
                 }
             }
             case Nil => Nil
@@ -134,25 +137,27 @@ object convertMacro {
 	//Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
 	def expandVariant(variant:Variant, fixed:FixedPoint) = {
 	    //the name for the fixed point (traitnameF)
-        val newtrait = newTypeName(fixed.name+"F")
+        val newtrait = newTypeName(fixed.name.toString+"F")
 		//the name of the original trait (which will now extend the new trait)
-        val oldtrait = newTypeName(fixed.name+"")
+        val oldtrait = newTypeName(fixed.name.toString+"")
 		//The additional type parameter
 		val fixedType1 = q"type FFunctor"
 		//The additional type parameter for the map functions
 		val fixedType2 = q"type FFunctor2"
 		//
 		//val fixedType3 = q"type FFunctor3"
+		//original type references
+		val originalTypes = typeDefsToTypeRefs(variant.typeParams)
 		//The new txpe needed for the case class
         val typeRef = typeDefsToTypeRefs(List(q"type $oldtrait[..${variant.typeParams}]"))
 		//the name of the case class
-        val newName = newTypeName(variant.name+"F")
+        val newName = newTypeName(variant.name.toString+"F")
 		//the name of the case class as a Termname, needed for the map(case class) and apply(object) function 
-        val newNameTerm = Ident(newTermName(variant.name+"F"))
+        val newNameTerm = Ident(newTermName(variant.name.toString+"F"))
 		//the name of the Object
-		val nameTerm = newTermName(variant.name+"")
+		val nameTerm = newTermName(variant.name.toString+"")
 		//the name of the normal class (and needed for the unapply fuction)
-		val oldName = newTypeName(variant.name+"")
+		val oldName = newTypeName(variant.name.toString+"")
 		//the type params for the case class
         val updatedTypeParams = variant.typeParams ++List(fixedType1)  //List(q"type FFunctor")//
 		//part of the return type (and result) of the map function
@@ -162,8 +167,17 @@ object convertMacro {
 		//for the map function it is necessary to apply the function to parameters of the correct type
         val appliedParams = applyDefinedValsOfTypeTo(variant.valParams,typeRef.head,Ident(newTermName("g")))
 		//the parameters of the case class need to be updated to the correct type
-        val newParams = updateType(variant.valParams,Ident(oldtrait),variant.typeParams,"FFunctor")
+        val newParams = updateType(variant.valParams,Ident(oldtrait),originalTypes,"FFunctor")
         //the map function for the case classes
+		//val funType = AppliedTypeTree(Select(Select(Ident(nme.ROOTPKG), newTermName("scala")), newTypeName("Function1")), List(Ident(newTypeName("FFunctor")), Ident(newTypeName("FFunctor2"))))
+		//val funType = reconstructTypes(List(q"type tmp = FFunctor => FFunctor2")).head
+		/*val geh = q"val g: FFunctor => FFunctor2"
+		val geh2 = geh match {
+			case q"val $gname: $gtype" => q"val $gname: ${reconstructTypes(List(gtype)).head}"
+			case _ => geh
+		}
+		println(showRaw(geh))
+		println(showRaw(geh2))*/
 		var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = $newNameTerm[..$mapType]()" //(..$fieldnames)"
         if(paramReferences.length!=0)
 			mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = ${Ident(newName)}(..$appliedParams)"
@@ -171,20 +185,22 @@ object convertMacro {
 		//the type params of the class as references for the apply and unapply functions
 	    val typeRefs = typeDefsToTypeRefs(variant.typeParams)
 		//the type that the normal class extends if there are parameters 
-        val extendType = q"${Ident(newName)}(..$paramReferences)"
+		val temp01 = Ident(newTypeName(variant.name.toString+"F"))// q"$newNameType(..$fieldnames)"
+        val extendType = q"$newNameTerm(..$paramReferences)"//Apply(temp01,paramReferences)//q"$temp01(..$paramReferences)"
 		//part of the type of the normal class, if there are no parameters
         val extendTypeParams = typeRefs ++ typeRef
 		//for the unapply function, the parameters need to be selected 
         val paramsSelect = valDefsToSelect(variant.valParams,"u")
 		//the apply function of the object
-        val app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new $newNameTerm(..$paramReferences)"
-        //the unapply function of the object
+        var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new $newNameTerm(..$paramReferences)"
+        if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
+		//the unapply function of the object
 		val unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[Unit] = Some((..$paramsSelect))"
         val objectBody = List(app) ++ List(unapp)        
 		//the purpose of all this, the case class, normal class and its companion object
 		val caseClass = q"case class $newName[..$updatedTypeParams](..$newParams) extends $newtrait[..${typeDefsToTypeRefs(updatedTypeParams)}]{..$mapBody}"
-		val classClass = if(paramReferences.length<1) q"class $oldName[..${variant.typeParams}](..${variant.valParams}) extends $newName[..$extendTypeParams] with $oldtrait[..${variant.typeParams}]"
-						 else q"class ${variant.name}[..${variant.typeParams}](..${variant.valParams}) extends $extendType with $oldtrait[..${variant.typeParams}]"
+		val classClass = if(paramReferences.length<1) q"class $oldName[..${variant.typeParams}](..${variant.valParams}) extends $newName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+						 else q"class ${variant.name}[..${variant.typeParams}](..${variant.valParams}) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
         val objectObject = q"object $nameTerm{..$objectBody}"
 		//return the three definitions
 		List(caseClass) ++ List(classClass) ++ List(objectObject)
@@ -214,6 +230,9 @@ object convertMacro {
          }"""
 
     }
+	
+	
+		
         
         val inputs = annottees.map(_.tree).toList
         val (annottee, expandees) = inputs match {
@@ -231,6 +250,38 @@ object convertMacro {
         val outputs = expandees
         println("?"*50)
         println("The Original")
+		
+		val xxx = q"""trait Lists {
+  trait ListF[T, L] {
+    def map[M](g: L => M): ListF[T, M] = this match {
+      case NilF() => NilF[T, M]()
+      case ConsF(head, tail) => ConsF(head, g(tail))
+    }
+  }
+
+  case class NilF[T, L] extends ListF[T, L]
+  case class ConsF[T, L](head: T, tail: L) extends ListF[T, L]
+
+  trait List[T] extends ListF[T, List[T]] {
+    def fold[R](phi: ListF[T, R] => R): R = phi(this map (_ fold phi))
+  }
+
+  class Nil[T] extends NilF[T, List[T]] with List[T]
+
+  object Nil {
+    def apply[T](): List[T] = new Nil[T]
+    def unapply[T](nil: Nil[T]): Option[Unit] = Some(())
+  }
+
+  class Cons[T](head: T, tail: List[T]) extends ConsF(head, tail) with List[T]
+
+  object Cons {
+    def apply[T](head: T, tail: List[T]): List[T] = new Cons(head, tail)
+    def unapply[T](list: Cons[T]): Option[(T, List[T])] = Some((list.head, list.tail))
+  }
+  }
+"""
+		//println(modify(expandees(0)))
         //println(outputs)
         println("?"*50)
         println("The Modified")
@@ -239,8 +290,9 @@ object convertMacro {
 		val res = createOutput(expandees(0)) 
         //println(showRaw(res))
 		println("?"*50)
-		println("run typeCheck")
-		//val res2 = c.typeCheck(Block(List(res), Literal(Constant(()))))
+		println(res)
+		//println("run typeCheck")
+		//val res2 = res//c.typeCheck(Block(List(res), Literal(Constant(()))))
 		//println(res2)
         println("?"*50)
 		println("returning result now")
@@ -249,7 +301,7 @@ object convertMacro {
 			//println(modify2(expandees(0),expandees(0)))
 			//println(businessLogicWIP(createInputWIP(extractDefList(expandees(0)))))
 			//println(modify(expandees(0)))
-     /*   
+        /*
 	val a = q"""abstract trait ListsF[T,FFunctor] {
     def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2]
   };"""	
@@ -258,9 +310,9 @@ object convertMacro {
   };"""
   val ll = List(a) ++ List(b)
   val res3 = q"""object ConvertMe {..$ll}"""
-  println(showRaw(res3))
-  if(res.equalsStructure(res3)) println("They are equal lol")
   */
+  //println(showRaw(res3))
+  //if(res.equalsStructure(res3)) println("They are equal lol")
   //println(res.tpe+" vs "+ res3.tpe)
 
         //c.Expr[Any](Block(expandees, Literal(Constant(()))))
