@@ -54,6 +54,7 @@ object convertMacro {
 		case TypeBoundsTree(Select(Select(a, b), c), Select(Select(d,e), f)) => TypeBoundsTree(Select(Select(a, newTermName(b.toString)), c), Select(Select(d,newTermName(e.toString)), f))
         case _ => x		
 	}
+	
 	//val defs to override
 	def valDefsToOverride(x:List[ValDef]):List[ValDef] = x match{
 		case q"val $name: $typ" :: z => q"override val $name: $typ" :: valDefsToOverride(z)
@@ -183,7 +184,7 @@ object convertMacro {
 		//the type params of the class as references for the apply and unapply functions
 	    val typeRefs = typeDefsToTypeRefs(variant.typeParams)
 		//the type that the normal class extends if there are parameters
-		val temp01 = Ident(newTermName(variant.name.toString+"F"))// q"$newNameType(..$fieldnames)"
+		val temp01 = Ident(newTypeName(variant.name.toString+"F"))// q"$newNameType(..$fieldnames)"
         val extendType = Apply(temp01,paramReferences)//q"$newNameTerm(..$paramReferences)"//Apply(temp01,paramReferences)//q"$temp01(..$paramReferences)"
 		//part of the type of the normal class, if there are no parameters
         val extendTypeParams = typeRefs ++ typeRef
@@ -201,7 +202,7 @@ object convertMacro {
 		val caseClass = q"case class $newName[..$updatedTypeParams](..$newParams) extends $newtrait[..${typeDefsToTypeRefs(updatedTypeParams)}]{..$mapBody}"
 		val classClass = if(paramReferences.length<1) q"class $oldName[..${variant.typeParams}](..${variant.valParams}) extends $newName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
 						 else{
-							q"class ${variant.name}[..${variant.typeParams}](..$overrideParams) extends ConsF(head,tail) with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]" 
+							q"class ${variant.name}[..${variant.typeParams}](..$overrideParams) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]" 
 						 } 
 		val objectObject = q"object $nameTerm{..$objectBody}"
 		//return the three definitions
