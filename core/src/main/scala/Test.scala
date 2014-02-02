@@ -24,8 +24,8 @@ object ConvertMe{
   trait Lists[T]
 
   // a case class with a name as argument is always bound
-  case class Nil[T] extends Lists[T]
-  //case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
+  //case class Nil[T] extends Lists[T]
+  case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
   //case class Whatevs[T](smthing:T)
 }
 
