@@ -55,12 +55,16 @@ object convertMacro {
             case _ => x        
         }
 
+		def extractTypes(x:List[ValDef]):List[Tree] = x match{
+			case ValDef(a,b,c,d) :: tail => c :: extractTypes(tail)
+			case _ => x
+		}
         //val defs to override
         def valDefsToOverride(x:List[ValDef]):List[ValDef] = x match{
-            case q"val $name: $typ" :: z => q"override val $name: $typ" :: valDefsToOverride(z)
+            //case q"val $name: $typ" :: z => q"override val $name: $typ" :: valDefsToOverride(z)
             case q"..$smth val $name: $typ" :: z => q"override val $name: $typ" :: valDefsToOverride(z)
-            //case ValDef(a,b,c,d) :: z => ValDef(a.mapAnnotations(kungFoo),b,c,d) :: valDefsToOverride(z)
-            case Nil => Nil
+            //case ValDef(a,b,c,d) :: tail => {println(showRaw(a)+"::::"+showRaw(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM))); ValDef(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM),b,c,d) :: valDefsToOverride(tail)}
+			case Nil => Nil
         }
         
         //clean Type takes a list of TypeDefs or AppliedTrees and
@@ -143,7 +147,7 @@ object convertMacro {
         }
         //Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
         def expandVariant(variant:Variant, fixed:FixedPoint) = {
-            //the name for the fixed point (traitnameF)
+			//the name for the fixed point (traitnameF)
             val newtrait = newTypeName(fixed.name.toString+"F")
             //the name of the original trait (which will now extend the new trait)
             val oldtrait = newTypeName(fixed.name.toString+"")
@@ -193,7 +197,11 @@ object convertMacro {
             var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}(..$paramReferences)"
             if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
             //the unapply function of the object
-            val unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[Unit] = Some((..$paramsSelect))"
+			var unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[Unit] = Some((..$paramsSelect))"
+			val newTypes2 = extractTypes(variant.valParams)
+			println(newTypes2)
+			if(variant.valParams.length>0) unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[(..$newTypes2)] = Some((..$paramsSelect))"
+            //val unapp = 
             val objectBody = List(app) ++ List(unapp) 
             //the valParams as overrides
             val overrideParams = valDefsToOverride(variant.valParams)
@@ -241,7 +249,7 @@ object convertMacro {
         val res = createOutput(expandees(0))
         val outputs = expandees
         //println("?"*50)
-        //println(res)
+        println(res)
     
         c.Expr[Any](Block(List(res), Literal(Constant(()))))
     }    

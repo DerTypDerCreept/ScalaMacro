@@ -21,6 +21,10 @@ object Test extends App {
         case NilF() => 0
         case ConsF(a, l) => a + l
     }
+    def sum2(list: Lists[Int]): Int = list match {
+        case Nil() => 0
+        case Cons(a, restOfTheList) => a + sum2(restOfTheList)
+    }
     def append(list: Lists[String],seperator:String): String = list.fold[String] {
         case NilF() => ""
         case ConsF(a, l) => a + seperator + l
@@ -29,6 +33,7 @@ object Test extends App {
     val list = Cons(1, Cons(2, Cons(3, Nil())))
     val list2 = Cons("Goodbye", Cons("Cruel", Cons("World", Nil())))
     println(s"sum($list) = ${sum(list)}")
+	println(s"sum2($list) = ${sum2(list)}")
     println(s"""append($list2) = ${append(list2,"-")}""")
     }
 
