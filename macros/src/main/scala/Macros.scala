@@ -74,7 +74,27 @@ object convertMacro {
             //case ValDef(a,b,c,d) :: tail => {println(showRaw(a)+"::::"+showRaw(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM))); ValDef(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM),b,c,d) :: valDefsToOverride(tail)}
 			case Nil => Nil
         }
-        
+		def valDefsToNoCase(x:List[ValDef]):List[ValDef] = x match{
+            //case _ => x
+			case q"val $name: $typ" :: z => q"val $name: $typ" :: valDefsToNoCase(z)
+            case q"..$smth val $name: $typ" :: z => q"val $name: $typ" :: valDefsToNoCase(z)
+            //case ValDef(a,b,c,d) :: tail => {println(showRaw(a)+"::::"+showRaw(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM))); ValDef(Modifiers(Flag.OVERRIDE | Flag.CASE | Flag.PARAM),b,c,d) :: valDefsToOverride(tail)}
+			case Nil => Nil
+        }
+        def valDefWithPrivate(x:List[ValDef]):List[ValDef] = {
+			val privMod = q"private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]" match {
+				case q"private class ConsF[T]($a, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]" => a match {
+						case ValDef(mods,_,_,_) => mods
+						case _ => throw new Exception("Could not Construct Private Modifier")
+				}
+				case _ => throw new Exception("Could not Construct Private Modifier")
+			}
+			x match {
+				case ValDef(a,b,c,d) :: z => ValDef(privMod,b,c,d) :: valDefWithPrivate(z)
+				case Nil => Nil
+				case _ => throw new Exception("Could not Construct Private Modifier"+x)
+			}
+		}
         //clean Type takes a list of TypeDefs or AppliedTrees and
         //returns a list of references to these types
         def typeDefsToTypeRefs(x:List[Tree]):List[Tree] = x match {
@@ -187,41 +207,47 @@ object convertMacro {
             val appliedParams = applyDefinedValsOfTypeTo(variant.valParams,typeRef.head,Ident(newTermName("g")))
             //the parameters of the case class need to be updated to the correct type
             val newParams = updateType(variant.valParams,Ident(oldtrait),originalTypes,"FFunctor")
-            //the map function for the case classes
-            var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = $newNameTerm[..$mapType]()" //(..$fieldnames)"
-            if(paramReferences.length!=0)
-                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = $newNameTerm(..$appliedParams)    "   //${Ident(newName)}(..$appliedParams)" //
-            val mapBody = List(mapFun)
             //the type params of the class as references for the apply and unapply functions
             val typeRefs = typeDefsToTypeRefs(variant.typeParams)
-            //the type that the normal class extends if there are parameters
-            val temp01 = Ident(newTypeName(variant.name.toString+"F"))// q"$newNameType(..$fieldnames)"
-            val extendType = Apply(temp01,paramReferences)//q"$newNameTerm(..$paramReferences)"//Apply(temp01,paramReferences)//q"$temp01(..$paramReferences)"
+
             //part of the type of the normal class, if there are no parameters
             val extendTypeParams = typeRefs ++ typeRef
             //for the unapply function, the parameters need to be selected 
             val paramsSelect = valDefsToSelect(variant.valParams,"u")
-            //the apply function of the object
-            var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}(..$paramReferences)"
-            if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
-            //the unapply function of the object
-			var unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[Unit] = Some((..$paramsSelect))"
-			val newTypes2 = extractTypes(variant.valParams)
-			println(newTypes2)
-			if(variant.valParams.length>0) unapp = q"def unapply[..${variant.typeParams}](u: $oldName[..$typeRefs]):Option[(..$newTypes2)] = Some((..$paramsSelect))"
-            //val unapp = 
-            val objectBody = List(app) ++ List(unapp) 
+
             //the valParams as overrides
             val overrideParams = valDefsToOverride(variant.valParams)
-            //the purpose of all this, the case class, normal class and its companion object
-            val caseClass = q"case class $newName[..$updatedTypeParams](..$newParams) extends $newtrait[..${typeDefsToTypeRefs(updatedTypeParams)}]{..$mapBody}"
-            val classClass = if(paramReferences.length<1) q"class $oldName[..${variant.typeParams}](..${variant.valParams}) extends $newName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
-                             else{
-                                q"class ${variant.name}[..${variant.typeParams}](..$overrideParams) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]" 
-                             } 
-            val objectObject = q"object $nameTerm{..$objectBody}"
-            //return the three definitions
-            List(caseClass) ++ List(classClass) ++ List(objectObject)
+			val noCaseParams = valDefWithPrivate(variant.valParams)
+			val updatedTypeRefs = typeDefsToTypeRefs(updatedTypeParams)
+			var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $nameTerm()" //new $nameTerm[..$mapType]()
+            if(paramReferences.length!=0)
+                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $nameTerm(..$appliedParams)"   //${Ident(newName)}(..$appliedParams)" //
+            val mapBody = List(mapFun)
+			val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCase(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
+			
+			val temp01 = Ident(newTypeName(variant.name.toString))// q"$newNameType(..$fieldnames)"
+			val temp02 = q"${Ident(newTypeName(variant.name.toString))}[..$extendTypeParams]"
+            val extendType = Apply(temp02,paramReferences)
+			val privateClass = if(paramReferences.length<1) q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $oldName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+							   else                         q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+			//variant.valParams
+			var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(newName)}(..$paramReferences)"
+            //if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
+            //the unapply function of the object
+			var unapp = q"def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Boolean = u.isInstanceOf[$oldName[..${typeDefsToTypeRefs(updatedTypeRefs)}]]"
+			//val newTypes2 = extractTypes(variant.valParams)
+			//println(newTypes2)
+			
+			val uType = AppliedTypeTree(Ident(variant.name),updatedTypeRefs)
+			if(variant.valParams.length>0) unapp = q"""def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Option[(..${updatedTypeRefs})] = u match {
+				case u: $uType  => Some((..$paramsSelect))
+				case _ => None
+			}
+			"""
+
+			val objBody = List(privateClass) ++ List(app) ++ List(unapp)
+            val obj = q"object $nameTerm {..$objBody}"
+			List(normalClass) ++ List(obj)
         }
 
         def businessLogic(input: BusinessInput): List[Tree] = {
@@ -261,7 +287,34 @@ object convertMacro {
             case (param: TypeDef) :: (rest @ (_ :: _)) => (param, rest)
             case _ => (EmptyTree, inputs)
         }        
-        println(showRaw(expandees(0)))
+		println("?"*75)
+        println(q"""class Nil[T, FFunctor]() extends ListsF[T, FFunctor] {
+        def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2] = new Nil()
+      }
+class Cons[T, FFunctor](val head: T, val tail: FFunctor) extends ListsF[T, FFunctor] {
+        def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2] = new Cons(head, g(tail))
+      }
+
+object Nil {
+        private class NilF[T]() extends Nil[T, Lists[T]] with Lists[T]
+        def apply[T](): Lists[T] = new NilF()
+        def unapply[T, FFunctor](u: ListsF[T, FFunctor]): Boolean =
+          u.isInstanceOf[Nil[T, FFunctor]]
+      }
+object Cons {
+        private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]
+        def apply[T](head: T, tail: Lists[T]): Lists[T] =
+          new ConsF(head, tail)
+
+        def unapply[T, FFunctor](u: ListsF[T, FFunctor]): Option[(T, FFunctor)] = u match {
+          case u: Cons[T, FFunctor] => Some((u.head, u.tail))
+          case _ => None
+        }
+      }""")
+	  println("?"*75)
+	  println(q"private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]")
+	  println(showRaw(q"private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]"))
+      println("?"*75) 
         val res = createOutputTrait(expandees(0))
         val outputs = expandees
         //println("?"*50)

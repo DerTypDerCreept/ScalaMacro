@@ -17,24 +17,17 @@ object Test extends App with ConvertMe{
     //import ConvertMe._
     spts("hello")
     //ConvertMe.saySomething
-    def sum(list: Lists[Int]): Int = list.fold[Int] {
-        case NilF() => 0
-        case ConsF(a, l) => a + l
-    }
-    def sum2(list: Lists[Int]): Int = list match {
+    val xs = Cons(1, Cons(2, Cons(3, Cons(4, Nil()))))
+      def sum1(xs: Lists[Int]): Int = xs.fold[Int] {
         case Nil() => 0
-        case Cons(a, restOfTheList) => a + sum2(restOfTheList)
-    }
-    def append(list: Lists[String],seperator:String): String = list.fold[String] {
-        case NilF() => ""
-        case ConsF(a, l) => a + seperator + l
-    }
-  
-    val list = Cons(1, Cons(2, Cons(3, Nil())))
-    val list2 = Cons("Goodbye", Cons("Cruel", Cons("World", Nil())))
-    println(s"sum($list) = ${sum(list)}")
-	println(s"sum2($list) = ${sum2(list)}")
-    println(s"""append($list2) = ${append(list2,"-")}""")
+        case Cons(head, tail) => head      tail
+      }
+      def sum2(xs: Lists[Int]): Int = xs match {
+        case Nil() => 0
+        case Cons(head, tail) => head      sum2(tail)
+      }
+      println(s"sum1 = ${sum1(xs)}")
+      println(s"sum2 = ${sum2(xs)}")
     }
 
     
