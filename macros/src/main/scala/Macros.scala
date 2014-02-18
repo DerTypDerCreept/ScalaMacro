@@ -195,6 +195,8 @@ object convertMacro {
             val newNameTerm = Ident(newTermName(variant.name.toString+"F"))
             //the name of the Object
             val nameTerm = newTermName(variant.name.toString+"")
+            //the name of the class
+            val className = newTypeName(variant.name.toString)
             //the name of the normal class (and needed for the unapply fuction)
             val oldName = newTypeName(variant.name.toString+"")
             //the type params for the case class
@@ -219,9 +221,9 @@ object convertMacro {
             val overrideParams = valDefsToOverride(variant.valParams)
 			val noCaseParams = valDefWithPrivate(variant.valParams)
 			val updatedTypeRefs = typeDefsToTypeRefs(updatedTypeParams)
-			var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $nameTerm()" //new $nameTerm[..$mapType]()
+			var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className()" //new $nameTerm[..$mapType]()
             if(paramReferences.length!=0)
-                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $nameTerm(..$appliedParams)"   //${Ident(newName)}(..$appliedParams)" //
+                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className(..$appliedParams)"   //${Ident(newName)}(..$appliedParams)" //
             val mapBody = List(mapFun)
 			val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCase(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
 			
