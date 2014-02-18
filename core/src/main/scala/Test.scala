@@ -20,11 +20,11 @@ object Test extends App with ConvertMe{
     val xs = Cons(1, Cons(2, Cons(3, Cons(4, Nil()))))
       def sum1(xs: Lists[Int]): Int = xs.fold[Int] {
         case Nil() => 0
-        case Cons(head, tail) => head      tail
+        case Cons(head, tail) => head  +   tail
       }
       def sum2(xs: Lists[Int]): Int = xs match {
         case Nil() => 0
-        case Cons(head, tail) => head      sum2(tail)
+        case Cons(head, tail) => head  +   sum2(tail)
       }
       println(s"sum1 = ${sum1(xs)}")
       println(s"sum2 = ${sum2(xs)}")
