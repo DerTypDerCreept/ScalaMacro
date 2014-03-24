@@ -1,3 +1,7 @@
+import TestTypes._
+import language.implicitConversions
+import org.scalatest._
+
 object Helper{
     //print test seperator
     def pts (text: String, seperator: String, length: Int){
@@ -7,10 +11,6 @@ object Helper{
     //standard test seperator
     def spts(text: String) = pts(text,"=",75)
 }
-
-
-
-
 
 object Test extends App with ConvertMe with Expr{
     import Helper.spts
@@ -29,6 +29,7 @@ object Test extends App with ConvertMe with Expr{
       println(s"sum1 = ${sum1(xs)}")
       println(s"sum2 = ${sum2(xs)}")
 	  val value = Mul(Add(Num(5),Num(5)),Num(2))
+	  /*
 	  val n = Num(5)
 	  val m = Num.unapply(n)
 	  println(m)
@@ -47,7 +48,7 @@ object Test extends App with ConvertMe with Expr{
 	  }
 	  
 	  println(eval(value))
-	  
+	  */
 	  def foldExp(e: Exp) : Int = e.fold[Int]{
 		case Num(n) => n
 		//case Id(x) => x
@@ -60,27 +61,59 @@ object Test extends App with ConvertMe with Expr{
 	}
 
     	
-@convert
-trait ConvertMe{
-  trait Lists[T]
 
-  // a case class with a name as argument is always bound
-  case class Nil[T] extends Lists[T]
-  case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
+// /*
+trait DataTypes
+extends Companies
+   with BinTrees
+
+class BinTreeSanityTest extends FlatSpec with DataTypes {
+  "completeBinaryTree" should "produce complete binary trees" in {
+    val List(bin1, bin2, bin3, bin4, bin5, bin6, bin7, bin8, bin9) =
+      (1 to 9).map(completeBinTree).toList
+    implicit def convert(n: Int): BinTree[Int] = Leaf(n)
+    assert(bin1 == Leaf(1))
+    assert(bin2 == Bin(1, 2))
+    assert(bin3 == Bin(Bin(1, 2), 3))
+    assert(bin4 == Bin(Bin(1, 2), Bin(3, 4)))
+    assert(bin5 == Bin(Bin(Bin(1, 2), 3), Bin(4, 5)))
+    assert(bin6 == Bin(Bin(Bin(1, 2), Bin(3, 4)), Bin(5, 6)))
+    assert(bin7 == Bin(Bin(Bin(1, 2), Bin(3, 4)), Bin(Bin(5, 6), 7)))
+    assert(bin8 == Bin(Bin(Bin(1, 2), Bin(3, 4)), Bin(Bin(5, 6), Bin(7, 8))))
+    assert(bin9 == Bin(Bin(Bin(Bin(1, 2), 3), Bin(4, 5)), Bin(Bin(6, 7), Bin(8, 9))))
+  }
 }
-/* /@convert
-trait Expr{
-	trait Exp[T]
-	case class Num[T](n: T) extends Exp[T]
-	case class Add[T](lhs: Exp[T], rhs: Exp[T]) extends Exp[T]
-	case class Mul[T](lhs: Exp[T], rhs: Exp[T]) extends Exp[T]
-	//case class Id(x: Symbol) extends Exp 
-}*/
-@convert
-trait Expr{
-	trait Exp
-	case class Num(n: Int) extends Exp
-	case class Add(lhs: Exp, rhs: Exp) extends Exp
-	case class Mul(lhs: Exp, rhs: Exp) extends Exp
-	case class Id(x: Symbol) extends Exp 
+
+// this example is for correctness.
+// @converMe macro doesn't make it easier to write
+// due to not supporting mutually recursive data types.
+class SelectSalary extends FlatSpec with DataTypes {
+
+  // collects all salary nodes in a list
+  def selectSalary(company: Company): List[Salary] = {
+    def selectSalary(department: Department): List[Salary] =
+      department.manager.salary :: (
+        for {
+          unit <- department.dUnits
+          salary = unit match {
+            case PU(employee) => List(employee.salary)
+            case DU(department) => selectSalary(department)
+          }
+          _ <- NoReturn
+        }
+        yield salary
+      )
+    company.departments flatMap selectSalary
+  }
+
+  "selectSalary" should "collect salary nodes in some order" in {
+    val sortedSalaries = selectSalary(genCom).sortBy(_.amount)
+    assert(sortedSalaries == List[Float](1000, 2000, 8000, 100000).map(Salary.apply))
+  }
 }
+
+object NoReturn {
+  def map[T](f: Unit => T): T = f(())
+}
+
+// */

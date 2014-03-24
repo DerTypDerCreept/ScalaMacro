@@ -19,7 +19,7 @@ object convertMacro {
         //represents a case class
         case class Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
         //contains a FixedPoint and a list of variants
-        case class BusinessInput(fixed: FixedPoint, variants: List[Variant])
+        case class BusinessInput(fixed: FixedPoint, variants: List[Variant], passThrough: List[Tree])
     
         //extracts the body of a ModuleDef
         def extractDefList(x:Tree):List[Tree] = x match {
@@ -48,6 +48,13 @@ object convertMacro {
             case Nil => Nil
             case _ => throw new Exception("Find Variants Malfunctioned")
         }
+		def findOthers(raw: List[Tree]):List[Tree] = raw match{
+			case q"case class $name[..$types](..$fields) extends $fix[..$smth]" :: tail => findOthers(tail)
+			case q"trait $traitname[..$types]" :: tail => findOthers(tail)
+			case q"def $init(..$smth) = {..$smth2}" :: tail => findOthers(tail)
+			case head :: tail => head :: findOthers(tail)
+			case Nil => Nil
+		}
         //Helper Functions
         def reconstructTypes(x:List[Tree]):List[Tree] = x match{
             case TypeDef(a,b,c,d) :: tail => TypeDef(a,b,c,reconstructTypesSub(d)) :: reconstructTypes(tail)
@@ -85,7 +92,7 @@ object convertMacro {
 			q"class Num[FFunctor](val n:Int) extends ExpF[FFunctor]" match{
 				case q"class Num[FFunctor](..$vals) extends ExpF[FFunctor]" => vals match{
 					case ValDef(a,b,c,d) :: ignore => x match { //Modifiers(scala.reflect.internal.Flags.ACCESSOR.toLong.asInstanceOf[FlagSet] | scala.reflect.internal.Flags.PARAMACCESSOR.toLong.asInstanceOf[FlagSet])
-						case ValDef(w,x,y,z) :: tail => {println("!!"*38);println(a);println(showRaw(a));  ValDef(a,x,y,z) :: valDefsToNoCasePlusVal(tail)}
+						case ValDef(w,x,y,z) :: tail => {/*println("!!"*38);println(a);println(showRaw(a)); */ ValDef(a,x,y,z) :: valDefsToNoCasePlusVal(tail)}
 						case Nil => Nil
 						case _ => throw new Exception("Could not convert params3")
 					}
@@ -247,7 +254,7 @@ object convertMacro {
 			
 			//count
 			val children = countChilds(variant.valParams,Ident(oldtrait),originalTypes)
-			println(variant.name + ":" + children)
+			//println(variant.name + ":" + children)
 			
             //part of the type of the normal class, if there are no parameters
             val extendTypeParams = typeRefs ++ typeRef
@@ -270,7 +277,7 @@ object convertMacro {
 			val mapBody = List(mapFun)
 			//val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCase(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
 			val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCasePlusVal(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
-			println(showRaw(valDefsToNoCasePlusVal(newParams)))
+			//println(showRaw(valDefsToNoCasePlusVal(newParams)))
 			val temp01 = Ident(newTypeName(variant.name.toString))// q"$newNameType(..$fieldnames)"
 			val temp02 = q"${Ident(newTypeName(variant.name.toString))}[..$extendTypeParams]"
             val extendType = Apply(temp02,paramReferences)
@@ -311,12 +318,12 @@ object convertMacro {
             var result = expandFixedPoint(input.fixed)
             while(y.hasNext)
                 result = result ++ expandVariant(y.next,input.fixed)
-            result
+            result ++ input.passThrough
         }
 
         def createInput(raw: List[Tree]): BusinessInput = {
             val fixed = findFixedPoint(raw)
-            BusinessInput(fixed, findVariants(raw,fixed.name))
+            BusinessInput(fixed, findVariants(raw,fixed.name), findOthers(raw))
         }
       
         def createOutput(original: Tree): Tree =
@@ -343,11 +350,11 @@ object convertMacro {
             case (param: TypeDef) :: (rest @ (_ :: _)) => (param, rest)
             case _ => (EmptyTree, inputs)
         }      
-		println("?"*75)
-		println(showRaw(q"case class Num(n: Int) extends Exp"))
-		println("?"*75)
-		println(q"class Num[T](val a:Int)")
-		println(showRaw(q"class Num[T](val a:Int)"))
+		//println("?"*75)
+		//println(showRaw(q"case class Num(n: Int) extends Exp"))
+		//println("?"*75)
+		//println(q"class Num[T](val a:Int)")
+		//println(showRaw(q"class Num[T](val a:Int)"))
         /*println(q"""class Nil[T, FFunctor]() extends ListsF[T, FFunctor] {
         def map[FFunctor2](g: FFunctor => FFunctor2): ListsF[T, FFunctor2] = new Nil()
       }
@@ -371,14 +378,14 @@ object Cons {
           case _ => None
         }
       }""")*/
-	  println("?"*75)
+	  //println("?"*75)
 	  //println(q"private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]")
 	  //println(showRaw(q"private class ConsF[T](head: T, tail: Lists[T]) extends Cons[T, Lists[T]](head, tail) with Lists[T]"))
-      println("?"*75) 
+      //println("?"*75) 
         val res = createOutputTrait(expandees(0))
         val outputs = expandees
         //println("?"*50)
-        println(res)
+        //println(res)
     
         c.Expr[Any](Block(List(res), Literal(Constant(()))))
     }    
