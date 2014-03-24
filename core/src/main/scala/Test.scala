@@ -29,6 +29,7 @@ object Test extends App with ConvertMe with Expr{
       println(s"sum1 = ${sum1(xs)}")
       println(s"sum2 = ${sum2(xs)}")
 	  val value = Mul(Add(Num(5),Num(5)),Num(2))
+	  println(value)
 	  /*
 	  val n = Num(5)
 	  val m = Num.unapply(n)

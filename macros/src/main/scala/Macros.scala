@@ -18,8 +18,10 @@ object convertMacro {
         case class FixedPoint(name: TypeName, typeParams: List[TypeDef])
         //represents a case class
         case class Variant(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef])
+		case class VariantV2(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef], extend: Tree, extendTypes: List[Tree])
         //contains a FixedPoint and a list of variants
         case class BusinessInput(fixed: FixedPoint, variants: List[Variant], passThrough: List[Tree])
+		case class BusinessInputV2(fixed: FixedPoint, variants: List[VariantV2], passThrough: List[Tree])
     
         //extracts the body of a ModuleDef
         def extractDefList(x:Tree):List[Tree] = x match {
@@ -37,6 +39,11 @@ object convertMacro {
             case head :: tail => findFixedPoint(tail)
             case _ => throw new Exception("Could not find Fixed Point (no trait in annotated object)")
         }
+		def findFixedPointV2(raw: List[Tree]): FixedPoint = raw match {
+            case q"trait $traitname[..$types]" :: tail => FixedPoint(traitname,reconstructTypes(types).asInstanceOf[List[TypeDef]])
+            case head :: tail => findFixedPointV2(tail)
+            case _ => null//throw new Exception("Could not find Fixed Point (no trait in annotated object)")
+        }
         //takes a list of Trees  and the name of a Type
         //and filters the list for case classes extending the given type
         //turning them into Variants
@@ -45,6 +52,13 @@ object convertMacro {
               if fix.toString == fixed.toString => 
                 Variant(name,reconstructTypes(types).asInstanceOf[List[TypeDef]],fields) :: findVariants(tail,fixed)
             case head :: tail => findVariants(tail,fixed)
+            case Nil => Nil
+            case _ => throw new Exception("Find Variants Malfunctioned")
+        }
+		def findVariantsV2(raw: List[Tree]): List[VariantV2] = raw match{
+            case q"case class $name[..$types](..$fields) extends $fix[..$smth]" :: tail
+              => VariantV2(name,reconstructTypes(types).asInstanceOf[List[TypeDef]],fields,fix,smth) :: findVariantsV2(tail)
+            case head :: tail => findVariantsV2(tail)
             case Nil => Nil
             case _ => throw new Exception("Find Variants Malfunctioned")
         }
@@ -312,26 +326,294 @@ object convertMacro {
             val obj = q"object $nameTerm {..$objBody}"
 			List(normalClass) ++ List(obj)
         }
+		def expandVariant3(variant:Variant, fixed:FixedPoint) = {
+			List(createNormalClass(variant,fixed)) ++ List(createObject(variant,fixed))
+        }
+		
+		def createPrintTree(params:List[Tree]):Tree = params match{
+			case head :: tail => createPrintTreeSub(head,tail)
+			case Nil => null//throw new Exception("No params")
+		}
+		def createPrintTreeSub(soFar:Tree, params:List[Tree]):Tree = params match{
+			case one :: tail => createPrintTreeSub(Apply(Select(Apply(Select(Select(soFar,newTermName("toString")),
+								newTermName("$plus")),List(Literal(Constant(",")))),newTermName("$plus")),
+								List(Ident(newTermName(one.toString)))),tail)
+			case Nil => soFar
+		} 
+		
+		def createPrivateClass(variant:Variant, fixed:FixedPoint) = {
+			//the name of the original trait (which will now extend the new trait)
+            val oldtrait = newTypeName(fixed.name.toString+"")
+            //the name of the case class
+            val newName = newTypeName(variant.name.toString+"F")
+            //the name of the normal class (and needed for the unapply fuction)
+            val oldName = newTypeName(variant.name.toString+"")
+            //the name of the parameters. devoid of their type, used on multiple occasions
+            val paramReferences = valDefsToValRefs(variant.valParams)
+            //the valParams as overrides
+            val noCaseParams = valDefWithPrivate(variant.valParams)
+			
+			val typeRef = typeDefsToTypeRefs(List(q"type $oldtrait[..${variant.typeParams}]"))
+			val typeRefs = typeDefsToTypeRefs(variant.typeParams)
+			val extendTypeParams = typeRefs ++ typeRef
+            
+			/*
+			var toStrLoop = ""
+			var i = 0;
+			for(i <- 0 to paramReferences.size-1){
+				toStrLoop += paramReferences(i).toString+".toString"
+				if(i<paramReferences.size-1) toStrLoop += """+","+""" 
+			}
+			val toStr = q"""override def toString():String = {
+								var str:String = ${variant.name.toString}+"("+${Constant(toStrLoop)} + ")"
+								str }
+						"""
+			*/
+			val str = createPrintTree(paramReferences)
+			val toStr = if(str != null)
+				q"""override def toString():String = {
+								var str:String = ${variant.name.toString}+"("+${str} + ")"
+								str }
+						"""
+			else q"""override def toString() = ${variant.name.toString+"()"}"""			
+			//println(showRaw(q"""x.toString+","+y.toString"""))
+			val temp02 = q"${Ident(newTypeName(variant.name.toString))}[..$extendTypeParams]"
+            val extendType = Apply(temp02,paramReferences)
+			//val privateClass = if(paramReferences.length<1) q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $oldName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+			//				   else                         q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+			val privateClass = if(paramReferences.length<1) q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $oldName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]{..${List(toStr)}}"
+							   else                         q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]{..${List(toStr)}}"
+			
+			privateClass
+		}
+		
+		def createObject (variant:Variant, fixed:FixedPoint) = {
+			//the name for the fixed point (traitnameF)
+            val newtrait = newTypeName(fixed.name.toString+"F")
+            //the name of the original trait (which will now extend the new trait)
+            val oldtrait = newTypeName(fixed.name.toString+"")
+            //The additional type parameter
+            val fixedType1 = q"type FFunctor"
+            //val fixedType3 = q"type FFunctor3"
+            //original type references
+            val originalTypes = typeDefsToTypeRefs(variant.typeParams)
+            //the name of the case class
+            val newName = newTypeName(variant.name.toString+"F")
+            //the name of the Object
+            val nameTerm = newTermName(variant.name.toString+"")
+            //the name of the normal class (and needed for the unapply fuction)
+            val oldName = newTypeName(variant.name.toString+"")
+            //the type params for the case class
+            val updatedTypeParams = variant.typeParams ++List(fixedType1)  //List(q"type FFunctor")//
+            //the name of the parameters. devoid of their type, used on multiple occasions
+            val paramReferences = valDefsToValRefs(variant.valParams)
+            //the parameters of the case class need to be updated to the correct type
+            val newParams = updateType(variant.valParams,Ident(oldtrait),originalTypes,"FFunctor")
+            //the type params of the class as references for the apply and unapply functions
+            val typeRefs = typeDefsToTypeRefs(variant.typeParams)
+			//for the unapply function, the parameters need to be selected 
+            val paramsSelect = valDefsToSelect(variant.valParams,"u")
+			val updatedTypeRefs = typeDefsToTypeRefs(updatedTypeParams)
+			var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(newName)}(..$paramReferences)"
+            //if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
+            //the unapply function of the object
+			var unapp = q"def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Boolean = u.isInstanceOf[$oldName[..${typeDefsToTypeRefs(updatedTypeRefs)}]]"
+			//val newTypes2 = extractTypes(variant.valParams)
+			val newTypes2 = extractTypes(newParams)
+			val uType = AppliedTypeTree(Ident(variant.name),createWildcards(updatedTypeParams))
+			if(variant.valParams.length>1) unapp = q"""def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Option[(..${newTypes2})] = u
+			match {
+				case u: $uType  => Some((..$paramsSelect))
+				case _ => None
+			}
+			"""
+			if(variant.valParams.length==1) unapp = q"""def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Option[${newTypes2(0)}] = u match
+			{
+				case u: $uType  => Some(${paramsSelect(0)})
+				case _ => None
+			}
+			"""
 
+			val objBody = List(createPrivateClass(variant,fixed)) ++ List(app) ++ List(unapp)
+            val obj = q"object $nameTerm {..$objBody}"
+			obj
+		}
+		
+		def createNormalClass(variant:Variant, fixed:FixedPoint) = {
+			//the name for the fixed point (traitnameF)
+            val newtrait = newTypeName(fixed.name.toString+"F")
+            //the name of the original trait (which will now extend the new trait)
+            val oldtrait = newTypeName(fixed.name.toString+"")
+            //The additional type parameter
+            val fixedType1 = q"type FFunctor"
+            //The additional type parameter for the map functions
+            val fixedType2 = q"type FFunctor2"
+            //original type references
+            val originalTypes = typeDefsToTypeRefs(variant.typeParams)
+            //The new txpe needed for the case class
+            val typeRef = typeDefsToTypeRefs(List(q"type $oldtrait[..${variant.typeParams}]"))
+            //the type params for the case class
+            val updatedTypeParams = variant.typeParams ++List(fixedType1)  //List(q"type FFunctor")//
+            //part of the return type (and result) of the map function
+            val mapType = typeDefsToTypeRefs(variant.typeParams ++ List(fixedType2)) //List(q"type FFunctor2") //
+            //the name of the parameters. devoid of their type, used on multiple occasions
+            val paramReferences = valDefsToValRefs(variant.valParams)
+            //for the map function it is necessary to apply the function to parameters of the correct type
+            val appliedParams = applyDefinedValsOfTypeTo(variant.valParams,typeRef.head,Ident(newTermName("g")))
+            //the parameters of the case class need to be updated to the correct type
+            val newParams = updateType(variant.valParams,Ident(oldtrait),originalTypes,"FFunctor")
+           
+			//count
+			val children = countChilds(variant.valParams,Ident(oldtrait),originalTypes)
+			
+			//the name of the class
+            val className = newTypeName(variant.name.toString)
+			
+            //the valParams as overrides
+            val updatedTypeRefs = typeDefsToTypeRefs(updatedTypeParams)
+			var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className()" //new $nameTerm[..$mapType]()
+			if(paramReferences.length!=0)
+                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className(..$appliedParams)"   //${Ident(newName)}(..$appliedParams)" //
+            if(children==0)
+				mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className[..$mapType](..$paramReferences)"   //${Ident(newName)}(..$appliedParams)" //
+            
+			val mapBody = List(mapFun)
+			//val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCase(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
+			val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCasePlusVal(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
+			normalClass
+		}
+		
+		
+		
+		//case class VariantV2(name: TypeName, typeParams: List[TypeDef], valParams: List[ValDef], extend: TypeName, extendTypes: List[Tree])  
+		def expandVariantV2(variant:VariantV2) = {
+			//the name for the fixed point (traitnameF)
+            val newtrait = newTypeName(variant.extend.toString+"F")
+            //the name of the original trait (which will now extend the new trait)
+            val oldtrait = newTypeName(variant.extend.toString+"")
+            //The additional type parameter
+            val fixedType1 = q"type FFunctor"
+            //The additional type parameter for the map functions
+            val fixedType2 = q"type FFunctor2"
+            //
+            //val fixedType3 = q"type FFunctor3"
+            //original type references
+            val originalTypes = typeDefsToTypeRefs(variant.typeParams)
+            //The new txpe needed for the case class
+            val typeRef = typeDefsToTypeRefs(List(q"type $oldtrait[..${variant.typeParams}]"))
+            //the name of the case class
+            val newName = newTypeName(variant.name.toString+"F")
+            //the name of the case class as a Termname, needed for the map(case class) and apply(object) function 
+            val newNameTerm = Ident(newTermName(variant.name.toString+"F"))
+            //the name of the Object
+            val nameTerm = newTermName(variant.name.toString+"")
+            //the name of the normal class (and needed for the unapply fuction)
+            val oldName = newTypeName(variant.name.toString+"")
+            //the type params for the case class
+            val updatedTypeParams = variant.typeParams ++List(fixedType1)  //List(q"type FFunctor")//
+            //part of the return type (and result) of the map function
+            val mapType = typeDefsToTypeRefs(variant.typeParams ++ List(fixedType2)) //List(q"type FFunctor2") //
+            //the name of the parameters. devoid of their type, used on multiple occasions
+            val paramReferences = valDefsToValRefs(variant.valParams)
+            //for the map function it is necessary to apply the function to parameters of the correct type
+            val appliedParams = applyDefinedValsOfTypeTo(variant.valParams,typeRef.head,Ident(newTermName("g")))
+            //the parameters of the case class need to be updated to the correct type
+            val newParams = updateType(variant.valParams,Ident(oldtrait),originalTypes,"FFunctor")
+            //the type params of the class as references for the apply and unapply functions
+            val typeRefs = typeDefsToTypeRefs(variant.typeParams)
+			
+			//count
+			val children = countChilds(variant.valParams,Ident(oldtrait),originalTypes)
+			//println(variant.name + ":" + children)
+			
+            //part of the type of the normal class, if there are no parameters
+            val extendTypeParams = typeRefs ++ typeRef
+            //for the unapply function, the parameters need to be selected 
+            val paramsSelect = valDefsToSelect(variant.valParams,"u")
+
+			//the name of the class
+            val className = newTypeName(variant.name.toString)
+			
+            //the valParams as overrides
+            val overrideParams = valDefsToOverride(variant.valParams)
+			val noCaseParams = valDefWithPrivate(variant.valParams)
+			val updatedTypeRefs = typeDefsToTypeRefs(updatedTypeParams)
+			var mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className()" //new $nameTerm[..$mapType]()
+			if(paramReferences.length!=0)
+                mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className(..$appliedParams)"   //${Ident(newName)}(..$appliedParams)" //
+            if(children==0)
+				mapFun = q"def map[FFunctor2](g: FFunctor => FFunctor2): $newtrait[..$mapType] = new $className[..$mapType](..$paramReferences)"   //${Ident(newName)}(..$appliedParams)" //
+            
+			val mapBody = List(mapFun)
+			//val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCase(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
+			val normalClass = q"class ${variant.name}[..$updatedTypeParams](..${valDefsToNoCasePlusVal(newParams)}) extends $newtrait[..${updatedTypeRefs}] {..$mapBody}"
+			//println(showRaw(valDefsToNoCasePlusVal(newParams)))
+			val temp01 = Ident(newTypeName(variant.name.toString))// q"$newNameType(..$fieldnames)"
+			val temp02 = q"${Ident(newTypeName(variant.name.toString))}[..$extendTypeParams]"
+            val extendType = Apply(temp02,paramReferences)
+			val privateClass = if(paramReferences.length<1) q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $oldName[..$extendTypeParams] with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+							   else                         q"private class $newName[..${variant.typeParams}](..${noCaseParams}) extends $extendType with $oldtrait[..${typeDefsToTypeRefs(variant.typeParams)}]"
+			//variant.valParams
+			//println("="*75)
+			//println(showRaw(privateClass))
+			var app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(newName)}(..$paramReferences)"
+            //if(variant.valParams.length==0) app = q"def apply[..${variant.typeParams}](..${variant.valParams}):$oldtrait[..$typeRefs] = new ${Ident(oldName)}[..$originalTypes]"
+            //the unapply function of the object
+			var unapp = q"def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Boolean = u.isInstanceOf[$oldName[..${typeDefsToTypeRefs(updatedTypeRefs)}]]"
+			//val newTypes2 = extractTypes(variant.valParams)
+			val newTypes2 = extractTypes(newParams)
+			//val uType = AppliedTypeTree(Ident(variant.name),updatedTypeRefs)
+			//val newTypes2 = extractTypes(variant.valParams)
+			//val uType = AppliedTypeTree(Ident(variant.name),extractTypes(variant.valParams))
+			//createWildcards(variant.typeParams)
+			val uType = AppliedTypeTree(Ident(variant.name),createWildcards(updatedTypeParams))
+			if(variant.valParams.length>1) unapp = q"""def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Option[(..${newTypes2})] = u match {
+				case u: $uType  => Some((..$paramsSelect))
+				case _ => None
+			}
+			"""
+			if(variant.valParams.length==1) unapp = q"""def unapply[..${updatedTypeParams}](u: $newtrait[..$updatedTypeRefs]):Option[${newTypes2(0)}] = u match {
+				case u: $uType  => Some(${paramsSelect(0)})
+				case _ => None
+			}
+			"""
+
+			val objBody = List(privateClass) ++ List(app) ++ List(unapp)
+            val obj = q"object $nameTerm {..$objBody}"
+			List(normalClass) ++ List(obj)
+        }
+
+		
+		
         def businessLogic(input: BusinessInput): List[Tree] = {
             val y = input.variants.iterator
             var result = expandFixedPoint(input.fixed)
             while(y.hasNext)
-                result = result ++ expandVariant(y.next,input.fixed)
+                result = result ++ expandVariant3(y.next,input.fixed)
             result ++ input.passThrough
         }
-
+		def businessLogicV2(input: BusinessInputV2): List[Tree] = {
+            val y = input.variants.iterator
+            var result = if (input.fixed != null) expandFixedPoint(input.fixed) else Nil
+            while(y.hasNext)
+                result = result ++ expandVariantV2(y.next)
+            result ++ input.passThrough
+        }
         def createInput(raw: List[Tree]): BusinessInput = {
             val fixed = findFixedPoint(raw)
             BusinessInput(fixed, findVariants(raw,fixed.name), findOthers(raw))
         }
-      
+		def createInputV2(raw: List[Tree]): BusinessInputV2 = {
+            println(raw)
+			val fixed = findFixedPointV2(raw)
+            BusinessInputV2(fixed, findVariantsV2(raw), findOthers(raw))
+        }
         def createOutput(original: Tree): Tree =
             original match {
                 case mod @ ModuleDef(a, objectName, templ) =>
                 q"""
                  object $objectName {
-                   ..${businessLogic(createInput(extractDefList(original)))}
+                   ..${businessLogicV2(createInputV2(extractDefList(original)))}
                 }"""
         }
 		def createOutputTrait(original: Tree): Tree =
@@ -340,6 +622,11 @@ object convertMacro {
                 q"""
                  trait $objectName {
                    ..${businessLogic(createInput(extractDefListTrait(original)))}
+                }"""
+				case mod @ ModuleDef(a, objectName, templ) =>
+                q"""
+                 object $objectName {
+                   ..${businessLogic(createInput(extractDefList(original)))}
                 }"""
         }
     
@@ -385,7 +672,7 @@ object Cons {
         val res = createOutputTrait(expandees(0))
         val outputs = expandees
         //println("?"*50)
-        //println(res)
+        println(res)
     
         c.Expr[Any](Block(List(res), Literal(Constant(()))))
     }    

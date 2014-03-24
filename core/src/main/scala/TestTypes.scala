@@ -8,7 +8,7 @@ trait ConvertMe{
   case class Nil[T] extends Lists[T]
   case class Cons[T](head:T, tail:Lists[T]) extends Lists[T]
 }
-
+// /*
 @convert
 trait Expr{
 	trait Exp
@@ -17,8 +17,24 @@ trait Expr{
 	case class Mul(lhs: Exp, rhs: Exp) extends Exp
 	case class Id(x: Symbol) extends Exp 
 }
+// */
+ /*
+@convert
+trait FixPoint{
+	trait Exp
+}
 
-
+@convert
+trait FixNumber extends FixPoint{
+	case class Num(n: Int) extends Exp
+}
+@convert 
+trait Expr extends FixNumber{
+	case class Add(lhs: Exp, rhs: Exp) extends Exp
+	case class Mul(lhs: Exp, rhs: Exp) extends Exp
+	case class Id(x: Symbol) extends Exp 
+}
+// */
 // paradise benchmark in "scrap your boilerplate"
 @convert
 trait Companies {
